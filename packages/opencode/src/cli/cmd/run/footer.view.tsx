@@ -40,6 +40,7 @@ import type {
   FooterQueuedPrompt,
   FooterState,
   FooterSubagentState,
+  FooterSubagentTab,
   FooterView,
   PermissionReply,
   QuestionReject,
@@ -98,7 +99,7 @@ type RunFooterViewProps = {
   onQuestionReject: (input: QuestionReject) => void | Promise<void>
   onCycle: () => void
   onInterrupt: () => boolean
-  onBackground?: () => void
+  onBackground?: (tabs: FooterSubagentTab[]) => void
   onEditorOpen: (input: { value: string }) => Promise<string | undefined>
   onInputClear: () => void
   onExitRequest?: () => boolean
@@ -110,6 +111,8 @@ type RunFooterViewProps = {
   onLayout: (input: { route: FooterPromptRoute; autocomplete: boolean; subagentRows: number }) => void
   onStatus: (text: string) => void
   onSubagentSelect?: (sessionID: string | undefined) => void
+  onModelCallCancel?: (tab: FooterSubagentTab) => void
+  onModelCallDetach?: (tab: FooterSubagentTab) => void
   onQueuedRemove: (messageID: string) => Promise<boolean>
 }
 
@@ -158,7 +161,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     return current.type === "subagent" ? current.sessionID : undefined
   })
   const tabs = createMemo(() => subagent().tabs)
-  const activeTabs = createMemo(() => tabs().filter((item) => item.status === "running"))
+  const activeTabs = createMemo(() => tabs().filter((item) => ["preparing", "queued", "running"].includes(item.status)))
   const selectedTab = createMemo(() => tabs().find((item) => item.sessionID === selected()))
   const selectedIndex = createMemo(() => {
     const sessionID = selected()
@@ -529,7 +532,7 @@ export function RunFooterView(props: RunFooterViewProps) {
         name: "session.background",
         title: "Background subagents",
         category: "Session",
-        run: () => props.onBackground?.(),
+        run: () => props.onBackground?.(activeTabs()),
       },
     ],
     bindings: props.tuiConfig.keybinds.get("session.background"),
@@ -937,6 +940,8 @@ export function RunFooterView(props: RunFooterViewProps) {
             diffStyle={props.diffStyle}
             onCycle={cycleTab}
             onClose={closeTab}
+            onCancel={props.onModelCallCancel}
+            onDetach={props.onModelCallDetach}
           />
         </box>
       </Show>

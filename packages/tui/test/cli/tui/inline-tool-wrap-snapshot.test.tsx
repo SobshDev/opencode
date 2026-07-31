@@ -4,6 +4,11 @@ import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { testRender, type JSX } from "@opentui/solid"
 import {
   formatCompletedSubagentDetail,
+  modelCallAction,
+  selectModelCallActions,
+  formatModelCallRef,
+  formatModelCallTitle,
+  formatModelCallUsage,
   formatSubagentRetry,
   formatSubagentTitle,
   formatSubagentToolcalls,
@@ -285,6 +290,155 @@ describe("TUI inline tool wrapping", () => {
     expect(formatSubagentTitle("Explore", "Inspect renderer", true)).toBe(
       "Explore Task (background) — Inspect renderer",
     )
+  })
+
+  test("formats model-call provenance, mode, usage, and cost", () => {
+    expect(formatModelCallRef({ providerID: "anthropic", id: "claude-sonnet", variant: "thinking" })).toBe(
+      "anthropic/claude-sonnet (thinking)",
+    )
+    expect(formatModelCallTitle("anthropic/claude-sonnet", true)).toBe(
+      "Model Call (background) — anthropic/claude-sonnet",
+    )
+    expect(
+      formatModelCallUsage({
+        cost: 0.012,
+        tokens: {
+          input: 100,
+          output: 20,
+          reasoning: 10,
+          cache: { read: 5, write: 1 },
+        },
+      }),
+    ).toBe("136 tokens · $0.01")
+  })
+
+  test("authorizes model-call actions only from typed child origin", () => {
+    const part = { callID: "tool-call", messageID: "msg-parent" }
+    const metadata = {
+      modelCall: {
+        type: "model_call",
+        callID: "mcl_spoofed",
+        parentSessionID: "ses-parent",
+        parentAssistantMessageID: "msg-parent",
+        parentToolCallID: "tool-call",
+      },
+    }
+
+    expect(modelCallAction(part, [{ id: "ses-child", parentID: "ses-parent", metadata }], "ses-parent")).toBeUndefined()
+    expect(
+      modelCallAction(
+        part,
+        [
+          {
+            id: "ses-child",
+            parentID: "ses-parent",
+            metadata,
+            origin: {
+              type: "model_call",
+              callID: "mcl_trusted",
+              parentSessionID: "ses-parent",
+              parentAssistantMessageID: "msg-parent",
+              parentToolCallID: "tool-call",
+              requestedModel: { providerID: "openai", id: "gpt-5" },
+            },
+          },
+        ],
+        "ses-parent",
+      ),
+    ).toMatchObject({
+      callID: "mcl_trusted",
+      parentSessionID: "ses-parent",
+      childSessionID: "ses-child",
+    })
+  })
+
+  test("cancels active background model calls without making them detachable", () => {
+    const actions = selectModelCallActions(
+      [
+        {
+          callID: "tool-call",
+          messageID: "msg-parent",
+          state: {
+            status: "completed",
+            input: { background: true },
+            metadata: { callID: "mcl_spoofed" },
+            output: JSON.stringify({
+              callID: "mcl_spoofed",
+              mode: "background",
+              status: "running",
+            }),
+          },
+        },
+      ],
+      [
+        {
+          id: "ses-child",
+          parentID: "ses-parent",
+          origin: {
+            type: "model_call",
+            callID: "mcl_trusted",
+            parentSessionID: "ses-parent",
+            parentAssistantMessageID: "msg-parent",
+            parentToolCallID: "tool-call",
+            requestedModel: { providerID: "openai", id: "gpt-5" },
+          },
+        },
+      ],
+      "ses-parent",
+    )
+
+    expect(actions.cancel).toEqual([
+      expect.objectContaining({
+        callID: "mcl_trusted",
+        parentSessionID: "ses-parent",
+        childSessionID: "ses-child",
+        background: true,
+      }),
+    ])
+    expect(actions.detach).toEqual([])
+  })
+
+  test("keeps foreground detachment separate and excludes terminal model calls", () => {
+    const origin = {
+      type: "model_call",
+      callID: "mcl_trusted",
+      parentSessionID: "ses-parent",
+      parentAssistantMessageID: "msg-parent",
+      parentToolCallID: "tool-call",
+      requestedModel: { providerID: "openai", id: "gpt-5" },
+    }
+    const sessions = [{ id: "ses-child", parentID: "ses-parent", origin }]
+    const foreground = selectModelCallActions(
+      [
+        {
+          callID: "tool-call",
+          messageID: "msg-parent",
+          state: { status: "running", input: { background: false } },
+        },
+      ],
+      sessions,
+      "ses-parent",
+    )
+    const terminal = selectModelCallActions(
+      [
+        {
+          callID: "tool-call",
+          messageID: "msg-parent",
+          state: {
+            status: "completed",
+            input: { background: true },
+            output: JSON.stringify({ mode: "background", status: "completed" }),
+          },
+        },
+      ],
+      sessions,
+      "ses-parent",
+    )
+
+    expect(foreground.cancel).toHaveLength(1)
+    expect(foreground.detach).toHaveLength(1)
+    expect(terminal.cancel).toEqual([])
+    expect(terminal.detach).toEqual([])
   })
 
   test("keeps retry status ahead of wrapping messages", () => {

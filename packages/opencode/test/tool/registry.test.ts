@@ -449,6 +449,7 @@ describe("tool.registry", () => {
         sessionID: SessionID.make("ses_test"),
         messageID: MessageID.make("msg_test"),
         agent: (yield* agents.defaultInfo()).name,
+        location: Tool.makeLocation("/tmp"),
         abort: new AbortController().signal,
         messages: [],
         metadata: () => Effect.void,

@@ -6,7 +6,7 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import type { Permission } from "../../src/permission"
-import type { Tool } from "@/tool/tool"
+import { Tool } from "@/tool/tool"
 import { SkillTool } from "../../src/tool/skill"
 import { ToolRegistry } from "@/tool/registry"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
@@ -18,6 +18,7 @@ const baseCtx: Omit<Tool.Context, "ask"> = {
   messageID: MessageID.make("msg_test"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

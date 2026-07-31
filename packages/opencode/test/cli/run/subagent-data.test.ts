@@ -5,6 +5,7 @@ import {
   bootstrapSubagentCalls,
   bootstrapSubagentData,
   createSubagentData,
+  modelCallAction,
   reduceSubagentData,
   snapshotSubagentData,
 } from "@/cli/cmd/run/subagent-data"
@@ -132,6 +133,70 @@ function taskMessage(sessionID: string, status: "running" | "completed" | "inter
         },
       },
     ],
+  }
+}
+
+function modelCallMessage(sessionID: string): SessionMessage {
+  return {
+    parts: [
+      {
+        id: `part-${sessionID}`,
+        sessionID: "parent-1",
+        messageID: `msg-${sessionID}`,
+        type: "tool",
+        callID: `tool-${sessionID}`,
+        tool: "model_call",
+        state: {
+          status: "completed",
+          input: {
+            model: {
+              providerID: "anthropic",
+              id: "claude-sonnet",
+              variant: "thinking",
+            },
+            prompt: "Review the implementation",
+            background: true,
+          },
+          output: "",
+          title: "Review the implementation",
+          metadata: {
+            callID: "mcl_1",
+            sessionId: sessionID,
+            actualModel: {
+              providerID: "anthropic",
+              id: "claude-sonnet",
+              variant: "thinking",
+            },
+            background: true,
+            status: "running",
+          },
+          time: { start: 1, end: 2 },
+        },
+      },
+    ],
+  }
+}
+
+function modelCallChild(
+  sessionID: string,
+  callID = "mcl_1",
+  requestedModel: { providerID: string; id: string; variant?: string } = {
+    providerID: "anthropic",
+    id: "claude-sonnet",
+    variant: "thinking",
+  },
+) {
+  return {
+    id: sessionID,
+    parentID: "parent-1",
+    origin: {
+      type: "model_call",
+      callID,
+      parentSessionID: "parent-1",
+      parentAssistantMessageID: `msg-${sessionID}`,
+      parentToolCallID: `tool-${sessionID}`,
+      requestedModel,
+    },
   }
 }
 
@@ -277,6 +342,216 @@ describe("run subagent data", () => {
       expect.objectContaining({
         sessionID: "child-1",
         status: "cancelled",
+      }),
+    ])
+  })
+
+  test("tracks model calls as navigable child tabs with exact model provenance", () => {
+    const data = createSubagentData()
+
+    bootstrapSubagentData({
+      data,
+      messages: [modelCallMessage("child-model-1")],
+      children: [modelCallChild("child-model-1")],
+      modelCalls: [
+        {
+          callID: "mcl_1",
+          parentSessionID: "parent-1",
+          childSessionID: "child-model-1",
+          requestedModel: {
+            providerID: "anthropic",
+            id: "claude-sonnet",
+            variant: "thinking",
+          },
+          actualModel: {
+            providerID: "anthropic",
+            id: "claude-sonnet",
+            variant: "thinking",
+          },
+          prompt: "Review the implementation",
+          background: true,
+          status: "completed",
+          usage: {
+            cost: 0.004,
+            tokens: {
+              input: 100,
+              output: 40,
+              reasoning: 10,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          timeUpdated: 5,
+        },
+      ],
+      permissions: [],
+      questions: [],
+    })
+
+    expect(snapshotSubagentData(data).tabs).toEqual([
+      expect.objectContaining({
+        sessionID: "child-model-1",
+        kind: "model_call",
+        modelCallID: "mcl_1",
+        modelCallParentSessionID: "parent-1",
+        model: "anthropic/claude-sonnet (thinking)",
+        mode: "background",
+        status: "completed",
+        usage: "150 tokens · $0.0040",
+      }),
+    ])
+    expect(modelCallAction(snapshotSubagentData(data).tabs[0]!)).toEqual({
+      sessionID: "parent-1",
+      callID: "mcl_1",
+    })
+
+    reduce(data, {
+      type: "model.call.requested",
+      properties: {
+        callID: "mcl_1",
+        childSessionID: "child-model-1",
+        origin: {
+          parentSessionID: "parent-1",
+        },
+      },
+    })
+    expect(snapshotSubagentData(data).tabs[0]?.status).toBe("completed")
+  })
+
+  test("hydrates model-call tabs from typed child origin without a parent tool snapshot", () => {
+    const data = createSubagentData()
+
+    bootstrapSubagentData({
+      data,
+      messages: [],
+      children: [
+        {
+          ...modelCallChild("child-model-1", "mcl_2", { providerID: "openai", id: "gpt-5.1" }),
+          title: "Independent review",
+          model: { providerID: "openai", id: "gpt-5.1" },
+          metadata: {
+            modelCall: {
+              type: "model_call",
+              callID: "mcl_2",
+              parentSessionID: "parent-1",
+              requestedModel: { providerID: "openai", id: "gpt-5.1" },
+              actualModel: { providerID: "openai", id: "gpt-5.1" },
+              mode: "foreground",
+              status: "queued",
+            },
+          },
+        },
+      ],
+      permissions: [],
+      questions: [],
+    })
+
+    expect(snapshotSubagentData(data).tabs).toEqual([
+      expect.objectContaining({
+        sessionID: "child-model-1",
+        modelCallID: "mcl_2",
+        modelCallParentSessionID: "parent-1",
+        label: "openai/gpt-5.1",
+        description: "Independent review",
+        status: "queued",
+      }),
+    ])
+  })
+
+  test("does not recognize or authorize metadata-only model-call children", () => {
+    const data = createSubagentData()
+
+    bootstrapSubagentData({
+      data,
+      messages: [modelCallMessage("child-model-1")],
+      children: [
+        {
+          id: "child-model-1",
+          metadata: {
+            modelCall: {
+              type: "model_call",
+              callID: "mcl_spoofed",
+              parentSessionID: "parent-1",
+              parentAssistantMessageID: "msg-child-model-1",
+              parentToolCallID: "tool-child-model-1",
+              status: "running",
+            },
+          },
+        },
+      ],
+      modelCalls: [
+        {
+          callID: "mcl_spoofed",
+          parentSessionID: "parent-1",
+          childSessionID: "child-model-1",
+          status: "running",
+        },
+      ],
+      permissions: [],
+      questions: [],
+    })
+
+    expect(snapshotSubagentData(data).tabs).toEqual([])
+  })
+
+  test("recognizes a live model-call child only after its typed session origin arrives", () => {
+    const data = createSubagentData()
+    const child = modelCallChild("child-model-1")
+
+    expect(
+      reduce(data, {
+        type: "session.created",
+        properties: {
+          sessionID: child.id,
+          info: {
+            ...child,
+            title: "Live review",
+            model: { providerID: "anthropic", id: "claude-sonnet", variant: "thinking" },
+            metadata: {
+              modelCall: {
+                ...child.origin,
+                status: "queued",
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(true)
+    expect(snapshotSubagentData(data).tabs).toEqual([
+      expect.objectContaining({
+        sessionID: child.id,
+        modelCallID: "mcl_1",
+        modelCallParentSessionID: "parent-1",
+        status: "queued",
+      }),
+    ])
+  })
+
+  test("applies model-call lifecycle events to an existing child tab", () => {
+    const data = createSubagentData()
+    bootstrapSubagentData({
+      data,
+      messages: [modelCallMessage("child-model-1")],
+      children: [modelCallChild("child-model-1")],
+      permissions: [],
+      questions: [],
+    })
+
+    reduce(data, {
+      type: "model.call.failed",
+      properties: {
+        callID: "mcl_1",
+        error: {
+          code: "MODEL_ERROR",
+          message: "Provider rejected the request",
+        },
+      },
+    })
+
+    expect(snapshotSubagentData(data).tabs).toEqual([
+      expect.objectContaining({
+        modelCallID: "mcl_1",
+        status: "failed",
+        error: "Provider rejected the request",
       }),
     ])
   })

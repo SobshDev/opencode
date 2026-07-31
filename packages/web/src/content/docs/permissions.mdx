@@ -155,6 +155,7 @@ OpenCode permissions are keyed by tool name, plus a couple of safety guards:
 - `grep` — content search (matches the regex pattern)
 - `bash` — running shell commands (matches parsed commands like `git status --porcelain`)
 - `task` — launching subagents (matches the subagent type)
+- `model_call` — delegating work to an exact model in a fresh child session
 - `skill` — loading a skill (matches the skill name)
 - `lsp` — running LSP queries (currently non-granular)
 - `question` — asking the user questions during execution

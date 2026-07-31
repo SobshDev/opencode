@@ -24,6 +24,8 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { ModelCall } from "@opencode-ai/schema/model-call"
+import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -90,6 +92,44 @@ describe("SessionV2.create", () => {
           model,
         }),
       ).toMatchObject({ location: { directory: location.directory, workspaceID }, agent: "build", model })
+    }),
+  )
+
+  it.effect("stores trusted origin and V2 permissions outside mutable metadata", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      const origin = {
+        type: "model_call" as const,
+        callID: ModelCall.CallID.create(),
+        parentSessionID: SessionV2.ID.create(),
+        parentAssistantMessageID: SessionMessage.ID.create(),
+        parentToolCallID: "trusted-tool-call",
+        requestedModel: {
+          providerID: ProviderV2.ID.anthropic,
+          id: ModelV2.ID.make("sonnet"),
+        },
+      }
+      const permission = [{ action: "model_call", resource: "*", effect: "deny" as const }]
+      const created = yield* session.create({
+        id,
+        location,
+        origin,
+        permission,
+        metadata: {
+          origin: { ...origin, parentToolCallID: "spoofed-tool-call" },
+          permissionV2: [{ action: "*", resource: "*", effect: "allow" }],
+        },
+      })
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
+
+      expect(created).toMatchObject({ origin, permission })
+      expect(row?.origin).toEqual(origin)
+      expect(row?.permission_v2).toEqual(permission)
+      expect(row?.metadata).toMatchObject({
+        origin: { parentToolCallID: "spoofed-tool-call" },
+        permissionV2: [{ effect: "allow" }],
+      })
     }),
   )
 
@@ -420,6 +460,64 @@ describe("SessionV2.create", () => {
             Effect.map((error) => error._tag),
           ),
       ).toBe("Session.NotFoundError")
+    }),
+  )
+
+  it.effect("keeps a model-call child's agent and model immutable", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const model = ModelV2.Ref.make({
+        id: ModelV2.ID.make("sonnet"),
+        providerID: ProviderV2.ID.anthropic,
+        variant: ModelV2.VariantID.make("high"),
+      })
+      const created = yield* session.create({
+        location,
+        agent: AgentV2.ID.make("build"),
+        model,
+        origin: {
+          type: "model_call",
+          callID: ModelCall.CallID.create(),
+          parentSessionID: SessionV2.ID.create(),
+          parentAssistantMessageID: SessionMessage.ID.create(),
+          parentToolCallID: "immutable-model-call",
+          requestedModel: model,
+        },
+      })
+
+      expect(
+        yield* session.switchAgent({ sessionID: created.id, agent: AgentV2.ID.make("plan") }).pipe(Effect.flip),
+      ).toMatchObject({
+        _tag: "Session.OperationUnavailableError",
+        operation: "switchAgent",
+      })
+      expect(
+        yield* session
+          .switchModel({
+            sessionID: created.id,
+            model: ModelV2.Ref.make({
+              id: ModelV2.ID.make("opus"),
+              providerID: ProviderV2.ID.anthropic,
+            }),
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({
+        _tag: "Session.OperationUnavailableError",
+        operation: "switchModel",
+      })
+
+      expect(yield* session.get(created.id)).toMatchObject({
+        agent: "build",
+        model,
+      })
+      expect(
+        yield* (yield* Database.Service).db
+          .select()
+          .from(EventTable)
+          .where(eq(EventTable.aggregate_id, created.id))
+          .all()
+          .pipe(Effect.orDie),
+      ).toHaveLength(1)
     }),
   )
 })

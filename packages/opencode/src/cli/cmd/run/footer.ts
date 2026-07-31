@@ -45,6 +45,7 @@ import type {
   FooterQueuedPrompt,
   FooterState,
   FooterSubagentState,
+  FooterSubagentTab,
   FooterView,
   PermissionReply,
   QuestionReject,
@@ -93,10 +94,12 @@ type RunFooterOptions = {
   onModelSelect?: (model: NonNullable<RunInput["model"]>) => CycleResult | void | Promise<CycleResult | void>
   onVariantSelect?: (variant: string | undefined) => CycleResult | void | Promise<CycleResult | void>
   onInterrupt?: () => void
-  onBackground?: () => void
+  onBackground?: (tabs: FooterSubagentTab[]) => void
   onEditorOpen: (input: { value: string }) => Promise<string | undefined>
   onExit?: () => void
   onSubagentSelect?: (sessionID: string | undefined) => void
+  onModelCallCancel?: (tab: FooterSubagentTab) => void
+  onModelCallDetach?: (tab: FooterSubagentTab) => void
   treeSitterClient?: TreeSitterClient
 }
 
@@ -341,6 +344,8 @@ export class RunFooter implements FooterApi {
               onLayout: footer.syncLayout,
               onStatus: footer.setStatus,
               onSubagentSelect: options.onSubagentSelect,
+              onModelCallCancel: options.onModelCallCancel,
+              onModelCallDetach: options.onModelCallDetach,
               onQueuedRemove: footer.handleQueuedRemove,
             })
           },

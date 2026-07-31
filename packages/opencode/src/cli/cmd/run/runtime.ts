@@ -18,6 +18,7 @@ import { MessageID } from "@/session/schema"
 import { createRunDemo } from "./demo"
 import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { modelCallAction } from "./subagent-data"
 import { trace } from "./trace"
 import { cycleVariant, formatModelLabel, resolveSavedVariant, resolveVariant, saveVariant } from "./variant.shared"
 import type { LocalReplayAnchor, LocalReplayRow, RunInput, RunPrompt, RunProvider, StreamCommit } from "./types"
@@ -40,6 +41,17 @@ type CreateSessionInput = {
 }
 
 type CreateSession = (sdk: RunInput["sdk"], input: CreateSessionInput) => Promise<{ id: string; title?: string }>
+
+function modelCallActions(sdk: RunInput["sdk"]) {
+  return (
+    sdk as unknown as {
+      modelCall?: {
+        cancel(input: { sessionID: string; callID: string }): Promise<unknown>
+        detach(input: { sessionID: string; callID: string }): Promise<unknown>
+      }
+    }
+  ).modelCall
+}
 
 type RunRuntimeInput = {
   boot: () => Promise<BootContext>
@@ -352,15 +364,46 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
           state.aborting = false
         })
     },
-    onBackground: () => {
+    onBackground: (tabs) => {
       if (!hasSession(input, state)) return
-      void ctx.sdk.experimental.session.background({ sessionID: state.sessionID }).catch(() => {})
+      if (tabs.some((tab) => tab.kind !== "model_call")) {
+        void ctx.sdk.experimental.session.background({ sessionID: state.sessionID }).catch(() => {})
+      }
+      for (const tab of tabs) {
+        const action = modelCallAction(tab)
+        if (tab.mode !== "foreground" || !action) continue
+        void modelCallActions(ctx.sdk)
+          ?.detach(action)
+          .catch(() => {})
+      }
     },
     onSubagentSelect: (sessionID) => {
       state.selectSubagent?.(sessionID)
       log?.write("subagent.select", {
         sessionID,
       })
+    },
+    onModelCallCancel: (tab) => {
+      const action = modelCallAction(tab)
+      if (!action) return
+      log?.write("model_call.cancel", {
+        callID: action.callID,
+        sessionID: tab.sessionID,
+      })
+      void modelCallActions(ctx.sdk)
+        ?.cancel(action)
+        .catch(() => {})
+    },
+    onModelCallDetach: (tab) => {
+      const action = modelCallAction(tab)
+      if (!action) return
+      log?.write("model_call.detach", {
+        callID: action.callID,
+        sessionID: tab.sessionID,
+      })
+      void modelCallActions(ctx.sdk)
+        ?.detach(action)
+        .catch(() => {})
     },
   })
   const footer = shell.footer

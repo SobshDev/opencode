@@ -104,7 +104,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
       id: input.id,
       session_id: input.sessionID,
       admitted_seq: input.admittedSeq,
-      prompt: encodePrompt(input.prompt),
+      prompt: input.prompt,
       delivery: input.delivery,
       time_created: DateTime.toEpochMillis(input.timeCreated),
     })
@@ -157,7 +157,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     .values({
       id: input.id,
       session_id: input.sessionID,
-      prompt: encodePrompt(input.prompt),
+      prompt: input.prompt,
       delivery: input.delivery,
       admitted_seq: input.promotedSeq,
       promoted_seq: input.promotedSeq,

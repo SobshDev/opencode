@@ -61,6 +61,39 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("retains the canonical catalog reference when the provider API model ID differs", () =>
+    Effect.gen(function* () {
+      const catalog = model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }, [
+        {
+          id: ModelV2.VariantID.make("high"),
+          headers: {},
+          body: { reasoning: { effort: "high" } },
+        },
+      ])
+      const selected = ModelV2.Ref.make({
+        providerID: catalog.providerID,
+        id: catalog.id,
+        variant: ModelV2.VariantID.make("high"),
+      })
+      const resolved = yield* SessionRunnerModel.resolve(
+        SessionV2.Info.make({
+          id: SessionV2.ID.make("ses_canonical_model_reference"),
+          projectID: ProjectV2.ID.global,
+          title: "test",
+          model: selected,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+          location: { directory: AbsolutePath.make("/project") },
+        }),
+        catalog,
+      )
+
+      expect(String(resolved.id)).toBe("api-test-model")
+      expect(SessionRunnerModel.reference(resolved)).toEqual(selected)
+    }),
+  )
+
   it.effect("keeps catalog apiKey credentials out of provider JSON", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

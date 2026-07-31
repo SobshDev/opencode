@@ -16,6 +16,7 @@ const ctx: Tool.Context = {
   sessionID: SessionID.make("ses_code-mode"),
   messageID: MessageID.make("msg_code-mode"),
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: new AbortController().signal,
   callID: "call_code_mode",
   messages: [],

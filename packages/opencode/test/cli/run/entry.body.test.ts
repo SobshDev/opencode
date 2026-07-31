@@ -282,6 +282,56 @@ describe("run entry body", () => {
     })
   })
 
+  test("renders model calls as structured child cards with provenance and usage", () => {
+    expect(
+      structured(
+        toolCommit({
+          tool: "model_call",
+          state: {
+            status: "completed",
+            input: {
+              model: {
+                providerID: "anthropic",
+                id: "claude-sonnet",
+                variant: "thinking",
+              },
+              prompt: "Review the implementation",
+              background: true,
+            },
+            title: "Review the implementation",
+            output: "{}",
+            metadata: {
+              callID: "mcl_1",
+              sessionId: "child-1",
+              actualModel: {
+                providerID: "anthropic",
+                id: "claude-sonnet",
+                variant: "thinking",
+              },
+              background: true,
+              status: "completed",
+              usage: {
+                cost: 0.012,
+                tokens: {
+                  input: 100,
+                  output: 20,
+                  reasoning: 10,
+                  cache: { read: 5, write: 1 },
+                },
+              },
+            },
+            time: { start: 1, end: 2 },
+          },
+        }),
+      ),
+    ).toEqual({
+      kind: "task",
+      title: "# Model Call · anthropic/claude-sonnet (thinking)",
+      rows: ["background · completed", "Review the implementation", "136 tokens · $0.01"],
+      tail: "",
+    })
+  })
+
   test("streams tool progress text and treats completed progress as done", () => {
     const body = entryBody(
       commit({

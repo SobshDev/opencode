@@ -105,6 +105,23 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.children",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.children(ctx.params.sessionID).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
         "session.switchAgent",
         Effect.fn(function* (ctx) {
           yield* session.switchAgent({ sessionID: ctx.params.sessionID, agent: ctx.payload.agent }).pipe(
@@ -113,6 +130,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 new SessionNotFoundError({
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new ServiceUnavailableError({
+                  message: `Session ${error.operation} is unavailable for model-call children`,
+                  service: `session.${error.operation}`,
                 }),
               ),
             ),
@@ -129,6 +154,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 new SessionNotFoundError({
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new ServiceUnavailableError({
+                  message: `Session ${error.operation} is unavailable for model-call children`,
+                  service: `session.${error.operation}`,
                 }),
               ),
             ),

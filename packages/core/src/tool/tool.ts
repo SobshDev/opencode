@@ -3,12 +3,15 @@ export * as Tool from "./tool"
 import { ToolDefinition, ToolFailure, ToolOutput, type ToolCall } from "@opencode-ai/llm"
 import { Effect, JsonSchema, Schema } from "effect"
 import type { AgentV2 } from "../agent"
+import type { Location } from "../location"
 import type { SessionMessage } from "../session/message"
 import type { SessionSchema } from "../session/schema"
 
 export interface Context {
   readonly sessionID: SessionSchema.ID
   readonly agent: AgentV2.ID
+  readonly location: Location.Ref
+  readonly abort: AbortSignal
   readonly assistantMessageID: SessionMessage.ID
   readonly toolCallID: string
 }
@@ -46,6 +49,7 @@ type Config<
   readonly input: Input
   readonly output: Output
   readonly structured?: Structured
+  readonly outputPolicy?: "bounded" | "preserve"
   readonly toStructuredOutput?: (input: {
     readonly input: Schema.Schema.Type<Input>
     readonly output: Output["Encoded"]
@@ -62,6 +66,7 @@ type Config<
 
 type Runtime = {
   readonly permission?: string
+  readonly outputPolicy: "bounded" | "preserve"
   readonly definition: (name: string) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
 }
@@ -76,6 +81,7 @@ export function make<
   const tool = Object.freeze({}) as Definition<Input, Structured>
   const definitions = new Map<string, ToolDefinition>()
   runtimes.set(tool, {
+    outputPolicy: config.outputPolicy ?? "bounded",
     definition: (name) => {
       const cached = definitions.get(name)
       if (cached) return cached
@@ -146,6 +152,7 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 }
 
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
+export const outputPolicy = (tool: AnyTool) => runtimeOf(tool).outputPolicy
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
 export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
 

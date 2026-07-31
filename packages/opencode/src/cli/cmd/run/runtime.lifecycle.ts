@@ -25,6 +25,7 @@ import type {
   QuestionReject,
   QuestionReply,
   RunAgent,
+  FooterSubagentTab,
   RunInput,
   RunPrompt,
   RunResource,
@@ -73,8 +74,10 @@ export type LifecycleInput = {
   onModelSelect?: (model: NonNullable<RunInput["model"]>) => CycleResult | void | Promise<CycleResult | void>
   onVariantSelect?: (variant: string | undefined) => CycleResult | void | Promise<CycleResult | void>
   onInterrupt?: () => void
-  onBackground?: () => void
+  onBackground?: (tabs: FooterSubagentTab[]) => void
   onSubagentSelect?: (sessionID: string | undefined) => void
+  onModelCallCancel?: (tab: FooterSubagentTab) => void
+  onModelCallDetach?: (tab: FooterSubagentTab) => void
 }
 
 export type Lifecycle = {
@@ -276,6 +279,8 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
         }
       },
       onSubagentSelect: input.onSubagentSelect,
+      onModelCallCancel: input.onModelCallCancel,
+      onModelCallDetach: input.onModelCallDetach,
     })
 
     const sigint = () => {

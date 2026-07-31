@@ -16,7 +16,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { testEffect } from "../lib/effect"
 import { Permission } from "../../src/permission"
-import type * as Tool from "../../src/tool/tool"
+import * as Tool from "../../src/tool/tool"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Git } from "@/git"
@@ -35,6 +35,7 @@ const ctx = {
   messageID: MessageID.make("msg_test"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

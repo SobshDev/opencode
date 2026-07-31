@@ -42,20 +42,26 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import type { ModelCallPromptOps } from "@/tool/model-call"
+import { ModelCallRecovery } from "@/model-call/recovery"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { ModelCallV2 } from "@opencode-ai/core/model-call"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { isDeepStrictEqual } from "node:util"
+import { Location } from "@opencode-ai/schema/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -113,6 +119,74 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+export function isExactPrompt(message: SessionV1.WithParts, input: PromptInput) {
+  const parts = exactPromptParts(input)
+  if (!parts || !isExactPromptInfo(message, input)) return false
+  return (
+    message.parts.length === parts.length &&
+    message.parts.every((part) => {
+      const expected = parts.find((candidate) => candidate.id === part.id)
+      return expected !== undefined && isDeepStrictEqual(part, expected)
+    })
+  )
+}
+
+function isExactPromptInfo(message: SessionV1.WithParts, input: PromptInput) {
+  if (
+    message.info.role !== "user" ||
+    message.info.id !== input.messageID ||
+    message.info.sessionID !== input.sessionID
+  ) {
+    return false
+  }
+  if (input.agent !== undefined && message.info.agent !== input.agent) return false
+  if (
+    input.model !== undefined &&
+    (message.info.model.providerID !== input.model.providerID ||
+      message.info.model.modelID !== input.model.modelID ||
+      normalizePromptVariant(message.info.model.variant) !== normalizePromptVariant(input.variant))
+  ) {
+    return false
+  }
+  return (
+    isDeepStrictEqual(message.info.format, input.format) &&
+    isDeepStrictEqual(message.info.system, input.system) &&
+    isDeepStrictEqual(message.info.tools, input.tools)
+  )
+}
+
+function exactPromptParts(input: PromptInput) {
+  if (!input.messageID || input.parts.some((part) => part.id === undefined)) return
+  return input.parts.map(
+    (part): SessionV1.Part =>
+      ({
+      ...part,
+      id: PartID.make(part.id!),
+      messageID: input.messageID,
+      sessionID: input.sessionID,
+      }) as SessionV1.Part,
+  )
+}
+
+export function isPromptConsumed(messages: SessionV1.WithParts[], messageID: MessageID) {
+  const boundary = messages.findIndex((message) => message.info.role === "user" && message.info.id === messageID)
+  if (boundary < 0) return false
+  const users = new Map(
+    messages.flatMap((message, index) =>
+      message.info.role === "user" ? ([[message.info.id, index]] as const) : [],
+    ),
+  )
+  return messages.some((message, index) => {
+    if (message.info.role !== "assistant") return false
+    const parent = users.get(message.info.parentID)
+    return parent !== undefined && parent >= boundary && index > parent
+  })
+}
+
+function normalizePromptVariant(variant: string | undefined) {
+  return variant === undefined || variant === "default" ? undefined : variant
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -154,13 +228,36 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const modelCalls = yield* ModelCallRecovery.Service
+    const calls = yield* ModelCallV2.Service
     const { db } = database
+    const exactAdmissions = new Map<string, { semaphore: Semaphore.Semaphore; claimed: boolean }>()
+    const exactAdmission = (input: { sessionID: SessionID; messageID: MessageID }) => {
+      const key = `${input.sessionID}/${input.messageID}`
+      const hit = exactAdmissions.get(key)
+      if (hit) return hit
+      const created = { semaphore: Semaphore.makeUnsafe(1), claimed: false }
+      exactAdmissions.set(key, created)
+      return created
+    }
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
         prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
-      } satisfies TaskPromptOps
+        admit: (input: PromptInput) => prompt({ ...input, noReply: true }).pipe(Effect.catch(Effect.die)),
+        admitExact: (input: PromptInput) => admitExact(input).pipe(Effect.catch(Effect.die)),
+        releaseExact: (input: { sessionID: SessionID; messageID: MessageID }) =>
+          Effect.sync(() => {
+            exactAdmissions.delete(`${input.sessionID}/${input.messageID}`)
+          }),
+        consumed: (input: { sessionID: SessionID; messageID: MessageID }) =>
+          sessions.messages({ sessionID: input.sessionID }).pipe(
+            Effect.map((messages) => isPromptConsumed(messages, input.messageID)),
+            Effect.catch(Effect.die),
+          ),
+        wake: (sessionID: SessionID) => loop({ sessionID }),
+      } satisfies TaskPromptOps & ModelCallPromptOps
     })
 
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
@@ -337,6 +434,10 @@ const layer = Layer.effect(
           messageID: assistantMessage.id,
           sessionID,
           abort: taskAbort.signal,
+          location: Location.Ref.make({
+            directory: AbsolutePath.make(assistantMessage.path.cwd),
+            ...(session.workspaceID === undefined ? {} : { workspaceID: session.workspaceID }),
+          }),
           callID: part.callID,
           extra: { bypassAgentCheck: true, promptOps },
           messages: msgs,
@@ -821,12 +922,18 @@ const layer = Layer.effect(
               const mime = (yield* fsys.isDir(filepath)) ? "application/x-directory" : part.mime
 
               const { read } = yield* registry.named()
+              const currentSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+              const instance = yield* InstanceState.context
               const execRead = (args: Parameters<typeof read.execute>[0], extra?: Tool.Context["extra"]) => {
                 const controller = new AbortController()
                 return read
                   .execute(args, {
                     sessionID: input.sessionID,
                     abort: controller.signal,
+                    location: Location.Ref.make({
+                      directory: AbsolutePath.make(instance.directory),
+                      ...(currentSession.workspaceID === undefined ? {} : { workspaceID: currentSession.workspaceID }),
+                    }),
                     agent: input.agent!,
                     messageID: info.id,
                     extra: { bypassCwdCheck: true, ...extra },
@@ -1080,6 +1187,27 @@ const layer = Layer.effect(
       return yield* loop({ sessionID: input.sessionID })
     })
 
+    const admitExact = Effect.fn("SessionPrompt.admitExact")(function* (input: PromptInput) {
+      if (!input.messageID) return yield* Effect.die(new Error("Exact prompt admission requires a message ID"))
+      const state = exactAdmission({ sessionID: input.sessionID, messageID: input.messageID })
+      return yield* state.semaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const repaired = yield* repairExactPrompt(sessions, input)
+          if (state.claimed) {
+            if (!repaired) {
+              return yield* Effect.die(
+                new Error(`Exact prompt claim exists without its message: ${input.sessionID}/${input.messageID}`),
+              )
+            }
+            return { message: repaired, claimed: false }
+          }
+          const message = repaired ?? (yield* prompt({ ...input, noReply: true }))
+          state.claimed = true
+          return { message, claimed: true }
+        }),
+      )
+    })
+
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
       if (Option.isSome(match)) return match.value
@@ -1122,7 +1250,7 @@ const layer = Layer.effect(
             lastAssistant?.finish &&
             !["tool-calls"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id
+            MessageV2.compareChronology(lastAssistant, lastUser) > 0
           ) {
             const orphan = lastAssistantMsg?.parts.find(
               (part): part is SessionV1.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
@@ -1233,24 +1361,26 @@ const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
-            const tools = yield* SessionTools.resolve({
-              agent,
-              session,
-              model,
-              processor: handle,
-              bypassAgentCheck,
-              messages: msgs,
-              promptOps,
-            }).pipe(
-              Effect.provideService(Plugin.Service, plugin),
-              Effect.provideService(Permission.Service, permission),
-              Effect.provideService(ToolRegistry.Service, registry),
-              Effect.provideService(MCP.Service, mcp),
-              Effect.provideService(Truncate.Service, truncate),
-              Effect.provideService(RuntimeFlags.Service, flags),
-            )
+            const tools = model.capabilities.toolcall
+              ? yield* SessionTools.resolve({
+                  agent,
+                  session,
+                  model,
+                  processor: handle,
+                  bypassAgentCheck,
+                  messages: msgs,
+                  promptOps,
+                }).pipe(
+                  Effect.provideService(Plugin.Service, plugin),
+                  Effect.provideService(Permission.Service, permission),
+                  Effect.provideService(ToolRegistry.Service, registry),
+                  Effect.provideService(MCP.Service, mcp),
+                  Effect.provideService(Truncate.Service, truncate),
+                  Effect.provideService(RuntimeFlags.Service, flags),
+                )
+              : {}
 
-            if (lastUser.format?.type === "json_schema") {
+            if (lastUser.format?.type === "json_schema" && model.capabilities.toolcall) {
               tools["StructuredOutput"] = createStructuredOutputTool({
                 schema: lastUser.format.schema,
                 onSuccess(output) {
@@ -1278,7 +1408,9 @@ const layer = Layer.effect(
               ...(skills ? [skills] : []),
             ]
             const format = lastUser.format ?? { type: "text" as const }
-            if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            if (format.type === "json_schema" && model.capabilities.toolcall) {
+              system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            }
             const result = yield* handle.process({
               user: lastUser,
               agent,
@@ -1292,7 +1424,7 @@ const layer = Layer.effect(
               ],
               tools,
               model,
-              toolChoice: format.type === "json_schema" ? "required" : undefined,
+              toolChoice: format.type === "json_schema" && model.capabilities.toolcall ? "required" : undefined,
             })
 
             if (structured !== undefined) {
@@ -1490,7 +1622,7 @@ const layer = Layer.effect(
       return result
     })
 
-    return Service.of({
+    const service = Service.of({
       cancel,
       prompt,
       loop,
@@ -1498,12 +1630,24 @@ const layer = Layer.effect(
       command,
       resolvePromptParts,
     })
+    yield* modelCalls.register({
+      calls,
+      provider,
+      prompts: yield* ops(),
+      sessions,
+    })
+    return service
   }),
 )
 
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
+})
+
+const TrustedTextPartInput = Schema.Struct({
+  ...SessionV1.TextPartInput.fields,
+  internal: SessionV1.TextPart.fields.internal,
 })
 
 export const PromptInput = Schema.Struct({
@@ -1521,7 +1665,7 @@ export const PromptInput = Schema.Struct({
   variant: Schema.optional(Schema.String),
   parts: Schema.Array(
     Schema.Union([
-      SessionV1.TextPartInput,
+      TrustedTextPartInput,
       SessionV1.FilePartInput,
       SessionV1.AgentPartInput,
       SessionV1.SubtaskPartInput,
@@ -1529,6 +1673,61 @@ export const PromptInput = Schema.Struct({
   ),
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
+
+export const PublicPromptInput = Schema.Struct({
+  ...PromptInput.fields,
+  parts: Schema.Array(
+    Schema.Union([
+      SessionV1.TextPartInput,
+      SessionV1.FilePartInput,
+      SessionV1.AgentPartInput,
+      SessionV1.SubtaskPartInput,
+    ]).annotate({ discriminator: "type" }),
+  ),
+})
+export type PublicPromptInput = Schema.Schema.Type<typeof PublicPromptInput>
+
+export const repairExactPrompt = Effect.fn("SessionPrompt.repairExactPrompt")(function* (
+  sessions: Session.Interface,
+  input: PromptInput,
+) {
+  if (!input.messageID) return yield* Effect.die(new Error("Exact prompt admission requires a message ID"))
+  const parts = exactPromptParts(input)
+  if (!parts) return yield* Effect.die(new Error("Exact prompt admission requires deterministic part IDs"))
+  const existing = Option.getOrUndefined(
+    yield* sessions.findMessage(input.sessionID, (message) => message.info.id === input.messageID),
+  )
+  if (!existing) return
+  if (!isExactPromptInfo(existing, input)) {
+    return yield* Effect.die(
+      new Error(`Exact prompt conflicts with existing message: ${input.sessionID}/${input.messageID}`),
+    )
+  }
+  for (const part of existing.parts) {
+    const expected = parts.find((candidate) => candidate.id === part.id)
+    if (!expected || !isDeepStrictEqual(part, expected)) {
+      return yield* Effect.die(
+        new Error(`Exact prompt conflicts with existing message: ${input.sessionID}/${input.messageID}`),
+      )
+    }
+  }
+  for (const part of parts) {
+    if (existing.parts.some((candidate) => candidate.id === part.id)) continue
+    yield* sessions.updatePart(part)
+  }
+  const repaired =
+    existing.parts.length === parts.length
+      ? existing
+      : Option.getOrUndefined(
+          yield* sessions.findMessage(input.sessionID, (message) => message.info.id === input.messageID),
+        )
+  if (!repaired || !isExactPrompt(repaired, input)) {
+    return yield* Effect.die(
+      new Error(`Exact prompt repair did not converge: ${input.sessionID}/${input.messageID}`),
+    )
+  }
+  return repaired
+})
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
@@ -1635,6 +1834,8 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    ModelCallV2.node,
+    ModelCallRecovery.node,
   ],
 })
 

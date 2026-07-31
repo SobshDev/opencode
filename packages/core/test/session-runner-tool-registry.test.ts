@@ -1,6 +1,8 @@
 import { describe, expect } from "bun:test"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import { AgentV2 } from "@opencode-ai/core/agent"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
@@ -29,11 +31,16 @@ const outputStore = Layer.mock(ToolOutputStore.Service, {
     )
   },
 })
-const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [[ToolOutputStore.node, outputStore]])
+const location = Location.boundNode({ directory: AbsolutePath.make("/project") })
+const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [
+  [ToolOutputStore.node, outputStore],
+  [Location.node, location],
+])
 const it = testEffect(registryLayer)
 const integrated = testEffect(
   AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node]), [
     [ToolOutputStore.node, outputStore],
+    [Location.node, location],
   ]),
 )
 const identity = {
@@ -243,7 +250,15 @@ describe("ToolRegistry", () => {
         ...identity,
         call: { type: "tool-call", id: "call-context", name: "context", input: {} },
       })
-      expect(contexts).toEqual([{ sessionID, ...identity, toolCallID: "call-context" }])
+      expect(contexts).toEqual([
+        {
+          sessionID,
+          ...identity,
+          toolCallID: "call-context",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
     }),
   )
 
@@ -264,6 +279,34 @@ describe("ToolRegistry", () => {
         outputPaths: ["/managed/generic"],
       })
       expect(bounds).toHaveLength(1)
+    }),
+  )
+
+  it.effect("preserves complete output when a tool opts out of generic bounding", () =>
+    Effect.gen(function* () {
+      bounds.length = 0
+      const service = yield* ToolRegistry.Service
+      const text = "x".repeat(60 * 1024)
+      yield* service.register({
+        preserved: Tool.make({
+          description: "Preserve a large result",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ text: Schema.String }),
+          outputPolicy: "preserve",
+          execute: () => Effect.succeed({ text }),
+          toModelOutput: ({ output }) => [{ type: "text", text: JSON.stringify(output) }],
+        }),
+      })
+      const settled = yield* settleTool(service, {
+        sessionID,
+        ...identity,
+        call: { type: "tool-call", id: "call-preserved", name: "preserved", input: {} },
+      })
+
+      expect(bounds).toEqual([])
+      expect(settled.outputPaths).toBeUndefined()
+      expect(settled.result.type).toBe("text")
+      if (settled.result.type === "text") expect(JSON.parse(settled.result.value)).toEqual({ text })
     }),
   )
 

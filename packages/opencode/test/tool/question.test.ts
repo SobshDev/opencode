@@ -8,12 +8,14 @@ import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
 import { testEffect } from "../lib/effect"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
+import { Tool } from "@/tool/tool"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-session"),
   messageID: MessageID.make("msg_test-message"),
   callID: "test-call",
   agent: "test-agent",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

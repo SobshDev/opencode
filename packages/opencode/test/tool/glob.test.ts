@@ -18,7 +18,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Git } from "@/git"
 import { Filesystem } from "@/util/filesystem"
 import { Permission } from "../../src/permission"
-import type * as Tool from "../../src/tool/tool"
+import * as Tool from "../../src/tool/tool"
 
 const toolLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
@@ -33,6 +33,7 @@ const ctx = {
   messageID: MessageID.make("msg_test"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

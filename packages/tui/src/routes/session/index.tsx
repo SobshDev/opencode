@@ -206,14 +206,23 @@ export function Session() {
   onCleanup(() => setEpilogue())
   const children = createMemo(() => {
     const parentID = session()?.parentID ?? session()?.id
+    const sessionIDs = new Set(parentID ? [parentID] : [])
+    let size = -1
+    while (size !== sessionIDs.size) {
+      size = sessionIDs.size
+      sync.data.session
+        .filter((item) => item.parentID && sessionIDs.has(item.parentID))
+        .forEach((item) => sessionIDs.add(item.id))
+    }
     return sync.data.session
-      .filter((x) => x.parentID === parentID || x.id === parentID)
+      .filter((item) => sessionIDs.has(item.id))
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const foregroundTasks = createMemo(() =>
-    sync.data.capabilities.experimentalBackgroundSubagents
-      ? messages().flatMap((message) =>
+    !sync.data.capabilities.experimentalBackgroundSubagents
+      ? []
+      : messages().flatMap((message) =>
           (sync.data.part[message.id] ?? []).filter(
             (part): part is ToolPart =>
               part.type === "tool" &&
@@ -221,9 +230,21 @@ export function Session() {
               part.state.status === "running" &&
               part.state.metadata?.background !== true,
           ),
-        )
-      : [],
+        ),
   )
+  const modelCallActions = createMemo(() =>
+    selectModelCallActions(
+      messages().flatMap((message) =>
+        (sync.data.part[message.id] ?? []).filter(
+          (part): part is ToolPart => part.type === "tool" && part.tool === "model_call",
+        ),
+      ),
+      sync.data.session,
+      route.sessionID,
+    ),
+  )
+  const foregroundModelCalls = createMemo(() => modelCallActions().detach)
+  const cancellableModelCalls = createMemo(() => modelCallActions().cancel)
   const permissions = createMemo(() => {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.permission[x.id] ?? [])
@@ -1016,16 +1037,37 @@ export function Session() {
       },
     },
     {
-      title: "Background subagents",
+      title: "Background child sessions",
       value: "session.background",
       category: "Session",
       hidden: true,
-      enabled: foregroundTasks().length > 0,
+      enabled: foregroundTasks().length > 0 || foregroundModelCalls().length > 0,
       run: () => {
-        void sdk.client.experimental.session.background({
-          sessionID: route.sessionID,
-          workspace: project.workspace.current(),
-        })
+        if (foregroundTasks().length > 0) {
+          void sdk.client.experimental.session.background({
+            sessionID: route.sessionID,
+            workspace: project.workspace.current(),
+          })
+        }
+        for (const action of foregroundModelCalls()) {
+          void modelCallClient(sdk.client)
+            ?.detach({ sessionID: action.parentSessionID, callID: action.callID })
+            .catch(() => {})
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "Cancel active model calls",
+      value: "session.model_call.cancel",
+      category: "Session",
+      enabled: cancellableModelCalls().length > 0,
+      run: () => {
+        for (const action of cancellableModelCalls()) {
+          void modelCallClient(sdk.client)
+            ?.cancel({ sessionID: action.parentSessionID, callID: action.callID })
+            .catch(() => {})
+        }
         dialog.clear()
       },
     },
@@ -1111,7 +1153,7 @@ export function Session() {
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
-    enabled: foregroundTasks().length > 0,
+    enabled: foregroundTasks().length > 0 || foregroundModelCalls().length > 0,
     priority: 1,
     bindings: tuiConfig.keybinds.get("session.background"),
   }))
@@ -1492,22 +1534,21 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           )
         }}
       </For>
-      <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
+      <Show when={props.parts.some((x) => x.type === "tool" && (x.tool === "task" || x.tool === "model_call"))}>
         <box paddingTop={1} paddingLeft={3}>
           <text fg={theme.text}>
             {childShortcut()}
-            <span style={{ fg: theme.textMuted }}> view subagents</span>
+            <span style={{ fg: theme.textMuted }}> view child sessions</span>
             <Show
-              when={
-                sync.data.capabilities.experimentalBackgroundSubagents &&
-                props.parts.some(
-                  (x) =>
-                    x.type === "tool" &&
-                    x.tool === "task" &&
-                    x.state.status === "running" &&
-                    x.state.metadata?.background !== true,
-                )
-              }
+              when={props.parts.some(
+                (x) =>
+                  x.type === "tool" &&
+                  (x.tool === "model_call" ||
+                    (x.tool === "task" && sync.data.capabilities.experimentalBackgroundSubagents)) &&
+                  x.state.status === "running" &&
+                  x.state.input.background !== true &&
+                  x.state.metadata?.background !== true,
+              )}
             >
               <span style={{ fg: theme.textMuted }}> · </span>
               {backgroundShortcut()}
@@ -1757,6 +1798,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         </Match>
         <Match when={display() === "task"}>
           <Task {...toolprops} />
+        </Match>
+        <Match when={display() === "model_call"}>
+          <ModelCall {...toolprops} />
         </Match>
         <Match when={display() === "execute"}>
           <Execute {...toolprops} />
@@ -2308,6 +2352,206 @@ function Task(props: ToolProps) {
   )
 }
 
+function ModelCall(props: ToolProps) {
+  const { theme } = useTheme()
+  const { navigate } = useRoute()
+  const sync = useSync()
+  const dialog = useDialog()
+  const sdk = useSDK()
+  const event = useEvent()
+  const [hydrated, setHydrated] = createSignal<Record<string, unknown>>({})
+  const action = createMemo(() => modelCallAction(props.part, sync.data.session, props.part.sessionID))
+  const child = createMemo(() => sync.data.session.find((item) => item.id === action()?.childSessionID))
+  const metadata = createMemo<Record<string, unknown>>(() => {
+    const trusted = action()
+    const session = child()
+    const modelCall = trusted && session ? matchingModelCallMetadata(session, trusted.origin) : undefined
+    return {
+      ...parseModelCallResult(props.output),
+      ...props.metadata,
+      ...trusted?.origin,
+      ...(session
+        ? {
+            sessionId: session.id,
+            actualModel: modelCall?.actualModel ?? session.model ?? trusted?.origin.requestedModel,
+          }
+        : {}),
+      ...modelCall,
+      ...hydrated(),
+    }
+  })
+  let hydratedCallID: string | undefined
+
+  createEffect(() => {
+    const id = action()?.childSessionID
+    if (id && !sync.data.message[id]?.length) void sync.session.sync(id)
+  })
+
+  createEffect(() => {
+    const trusted = action()
+    if (!trusted || trusted.callID === hydratedCallID) return
+    hydratedCallID = trusted.callID
+    void modelCallClient(sdk.client)
+      ?.get({ sessionID: trusted.parentSessionID, callID: trusted.callID })
+      .then((response) => {
+        const data = recordValue(response.data)
+        const value = recordValue(data?.data) ?? data
+        if (
+          !value ||
+          stringValue(value.callID) !== trusted.callID ||
+          stringValue(value.parentSessionID) !== trusted.parentSessionID ||
+          stringValue(value.childSessionID) !== trusted.childSessionID ||
+          !sameModelCallRef(value.requestedModel, trusted.origin.requestedModel)
+        )
+          return
+        const previousStatus = stringValue(metadata().status)
+        const incomingStatus = stringValue(value.status)
+        setHydrated((current) => ({
+          ...current,
+          ...value,
+          status:
+            incomingStatus &&
+            (!previousStatus || modelCallStatusRank(incomingStatus) >= modelCallStatusRank(previousStatus))
+              ? incomingStatus
+              : previousStatus,
+        }))
+      })
+      .catch(() => {})
+  })
+
+  const unsubscribe = event.subscribe((value) => {
+    const item = value as unknown as { type?: unknown; properties?: unknown }
+    const type = stringValue(item.type)
+    if (!type?.startsWith("model.call.")) return
+    const trusted = action()
+    if (!trusted) return
+    const properties = recordValue(item.properties)
+    if (stringValue(properties?.callID) !== trusted.callID) return
+    const previousStatus = stringValue(metadata().status)
+    const eventStatus = modelCallLifecycleStatus(type)
+    const status =
+      eventStatus && (!previousStatus || modelCallStatusRank(eventStatus) >= modelCallStatusRank(previousStatus))
+        ? eventStatus
+        : previousStatus
+    setHydrated((current) => ({
+      ...current,
+      ...properties,
+      status: status ?? current.status,
+      ...(type === "model.call.detached" ? { background: true, mode: "background" } : {}),
+    }))
+  })
+  onCleanup(unsubscribe)
+
+  const sessionID = createMemo(() => action()?.childSessionID)
+  const messages = createMemo(() => sync.data.message[sessionID() ?? ""] ?? [])
+  const tools = createMemo(() =>
+    messages().flatMap((message) =>
+      (sync.data.part[message.id] ?? [])
+        .filter((part): part is ToolPart => part.type === "tool")
+        .map((part) => ({ tool: part.tool, state: part.state })),
+    ),
+  )
+  const current = createMemo(() =>
+    tools().findLast(
+      (item) => (item.state.status === "running" || item.state.status === "completed") && item.state.title,
+    ),
+  )
+  const model = createMemo(() => formatModelCallRef(metadata().actualModel ?? props.input.model))
+  const status = createMemo(() => {
+    const value = stringValue(metadata().status)
+    if (value) return value
+    if (props.part.state.status === "error") return "failed"
+    return props.part.state.status
+  })
+  const background = createMemo(
+    () => metadata().background === true || metadata().mode === "background" || props.input.background === true,
+  )
+  const active = createMemo(() => ["preparing", "queued", "running"].includes(status()))
+  const usage = createMemo(() => formatModelCallUsage(metadata().usage))
+  const failure = createMemo(() => {
+    const error = recordValue(metadata().error)
+    return stringValue(error?.message) ?? (props.part.state.status === "error" ? props.part.state.error : undefined)
+  })
+  const content = createMemo(() => {
+    const rows = [formatModelCallTitle(model(), background())]
+    if (active() && current()) {
+      const item = current()!
+      const title = item.state.status === "running" || item.state.status === "completed" ? item.state.title : undefined
+      rows.push(`↳ ${Locale.titlecase(item.tool)} ${title}`)
+    } else if (active()) {
+      rows.push(`↳ ${status()}`)
+    } else {
+      rows.push(`↳ ${[status(), usage(), failure()].filter(Boolean).join(" · ")}`)
+    }
+    return rows.join("\n")
+  })
+
+  return (
+    <InlineTool
+      icon={
+        status() === "failed"
+          ? "✗"
+          : status() === "cancelled" || status() === "interrupted"
+            ? "○"
+            : status() === "completed"
+              ? "✓"
+              : "│"
+      }
+      separate={true}
+      color={failure() ? theme.error : undefined}
+      spinner={active()}
+      complete={true}
+      pending="Calling model..."
+      part={props.part}
+      onClick={() => {
+        if (sessionID()) navigate({ type: "session", sessionID: sessionID()! })
+        if (failure()) void DialogAlert.show(dialog, "Model Call Failed", failure()!)
+      }}
+    >
+      {content()}
+    </InlineTool>
+  )
+}
+
+export function formatModelCallRef(value: unknown) {
+  const model = recordValue(value)
+  const providerID = stringValue(model?.providerID)
+  const id = stringValue(model?.id) ?? stringValue(model?.modelID)
+  if (!providerID || !id) return "Model"
+  const variant = stringValue(model?.variant)
+  return `${providerID}/${id}${variant && variant !== "default" ? ` (${variant})` : ""}`
+}
+
+export function formatModelCallTitle(model: string, background: boolean) {
+  return `Model Call${background ? " (background)" : ""} — ${model}`
+}
+
+export function formatModelCallUsage(value: unknown) {
+  const usage = recordValue(value)
+  const tokens = recordValue(usage?.tokens)
+  const cache = recordValue(tokens?.cache)
+  const total =
+    (numberValue(tokens?.input) ?? 0) +
+    (numberValue(tokens?.output) ?? 0) +
+    (numberValue(tokens?.reasoning) ?? 0) +
+    (numberValue(cache?.read) ?? 0) +
+    (numberValue(cache?.write) ?? 0)
+  const cost = numberValue(usage?.cost)
+  return [
+    total > 0 ? `${Locale.number(total)} tokens` : undefined,
+    cost && cost > 0
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: cost < 0.01 ? 4 : 2,
+          maximumFractionDigits: cost < 0.01 ? 4 : 2,
+        }).format(cost)
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 export function formatSubagentToolcalls(count: number) {
   return `${count} toolcall${count === 1 ? "" : "s"}`
 }
@@ -2627,6 +2871,177 @@ function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
+function modelCallClient(value: unknown) {
+  return (
+    value as {
+      modelCall?: {
+        get(input: { sessionID: string; callID: string }): Promise<{ data?: unknown }>
+        cancel(input: { sessionID: string; callID: string }): Promise<unknown>
+        detach(input: { sessionID: string; callID: string }): Promise<unknown>
+      }
+    }
+  ).modelCall
+}
+
+export function modelCallAction(
+  part: Pick<ToolPart, "callID" | "messageID">,
+  sessions: readonly {
+    id?: unknown
+    parentID?: unknown
+    metadata?: unknown
+    origin?: unknown
+  }[],
+  parentSessionID: string,
+) {
+  for (const session of sessions) {
+    const origin = recordValue(session.origin)
+    const callID = stringValue(origin?.callID)
+    const childSessionID = stringValue(session.id)
+    if (
+      origin?.type !== "model_call" ||
+      !callID ||
+      !childSessionID ||
+      stringValue(session.parentID) !== parentSessionID ||
+      stringValue(origin.parentSessionID) !== parentSessionID ||
+      stringValue(origin.parentAssistantMessageID) !== part.messageID ||
+      stringValue(origin.parentToolCallID) !== part.callID
+    )
+      continue
+    return {
+      callID,
+      parentSessionID,
+      childSessionID,
+      origin,
+    }
+  }
+}
+
+export function selectModelCallActions(
+  parts: readonly {
+    callID: string
+    messageID: string
+    state: {
+      status: string
+      input?: unknown
+      metadata?: unknown
+      output?: unknown
+    }
+  }[],
+  sessions: readonly {
+    id?: unknown
+    parentID?: unknown
+    metadata?: unknown
+    origin?: unknown
+  }[],
+  parentSessionID: string,
+) {
+  const active = parts.flatMap((part) => {
+    const action = modelCallAction(part, sessions, parentSessionID)
+    if (!action) return []
+    const child = sessions.find((session) => session.id === action.childSessionID)
+    const result = parseModelCallResult(part.state.output)
+    const metadata = recordValue(part.state.metadata)
+    const childMetadata = child ? matchingModelCallMetadata(child, action.origin) : undefined
+    const statuses = [result.status, metadata?.status, childMetadata?.status]
+      .map(stringValue)
+      .filter(
+        (status): status is string =>
+          status !== undefined &&
+          ["preparing", "queued", "running", "completed", "failed", "cancelled", "interrupted"].includes(status),
+      )
+    if (
+      part.state.status === "error" ||
+      statuses.some((status) => ["completed", "failed", "cancelled", "interrupted"].includes(status)) ||
+      (!statuses.some((status) => ["preparing", "queued", "running"].includes(status)) &&
+        part.state.status !== "running")
+    )
+      return []
+    const input = recordValue(part.state.input)
+    return [
+      {
+        ...action,
+        background:
+          result.background === true ||
+          result.mode === "background" ||
+          metadata?.background === true ||
+          metadata?.mode === "background" ||
+          childMetadata?.background === true ||
+          childMetadata?.mode === "background" ||
+          input?.background === true,
+      },
+    ]
+  })
+  return {
+    cancel: active,
+    detach: active.filter((action) => !action.background),
+  }
+}
+
+function matchingModelCallMetadata(
+  session: {
+    metadata?: unknown
+  },
+  origin: Record<string, unknown>,
+) {
+  const value = recordValue(recordValue(session.metadata)?.modelCall)
+  if (!value || stringValue(value.callID) !== stringValue(origin.callID)) return undefined
+  if (stringValue(value.parentSessionID) && stringValue(value.parentSessionID) !== stringValue(origin.parentSessionID))
+    return undefined
+  if (
+    stringValue(value.parentAssistantMessageID) &&
+    stringValue(value.parentAssistantMessageID) !== stringValue(origin.parentAssistantMessageID)
+  )
+    return undefined
+  if (
+    stringValue(value.parentToolCallID) &&
+    stringValue(value.parentToolCallID) !== stringValue(origin.parentToolCallID)
+  )
+    return undefined
+  if (value.requestedModel && !sameModelCallRef(value.requestedModel, origin.requestedModel)) return undefined
+  return value
+}
+
+function sameModelCallRef(left: unknown, right: unknown) {
+  const a = recordValue(left)
+  const b = recordValue(right)
+  return (
+    stringValue(a?.providerID) === stringValue(b?.providerID) &&
+    stringValue(a?.id) === stringValue(b?.id) &&
+    (stringValue(a?.variant) ?? "default") === (stringValue(b?.variant) ?? "default")
+  )
+}
+
+function modelCallLifecycleStatus(type: string) {
+  return (
+    {
+      "model.call.requested": "preparing",
+      "model.call.prepared": "preparing",
+      "model.call.queued": "queued",
+      "model.call.started": "running",
+      "model.call.completed": "completed",
+      "model.call.failed": "failed",
+      "model.call.cancelled": "cancelled",
+      "model.call.interrupted": "interrupted",
+    } as Record<string, string>
+  )[type]
+}
+
+function modelCallStatusRank(status: string) {
+  if (status === "preparing") return 0
+  if (status === "queued") return 1
+  if (status === "running") return 2
+  return 3
+}
+
+function parseModelCallResult(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return {}
+  try {
+    return recordValue(JSON.parse(value)) ?? {}
+  } catch {
+    return {}
+  }
+}
+
 const toolDisplays = new Set([
   "bash",
   "glob",
@@ -2637,6 +3052,7 @@ const toolDisplays = new Set([
   "write",
   "edit",
   "task",
+  "model_call",
   "apply_patch",
   "todowrite",
   "question",

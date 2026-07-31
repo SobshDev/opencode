@@ -10,6 +10,11 @@ import {
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
 
+type ModelReference = {
+  readonly providerID: string
+  readonly id: string
+}
+
 const media = (file: FileAttachment): ContentPart => ({
   type: "media",
   mediaType: file.mime,
@@ -67,9 +72,10 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
   }
 }
 
-const assistant = (message: SessionMessage.Assistant, model: Model) => {
+const assistant = (message: SessionMessage.Assistant, model: Model, reference: ModelReference) => {
   const sameModel =
-    String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
+    String(message.model.providerID) === String(reference.providerID) &&
+    String(message.model.id) === String(reference.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
   const content = message.content.flatMap((item): ContentPart[] => {
     if (item.type === "text") return [{ type: "text", text: item.text }]
@@ -112,7 +118,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   ]
 }
 
-function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] {
+function toLLMMessage(message: SessionMessage.Message, model: Model, reference: ModelReference): Message[] {
   switch (message.type) {
     case "agent-switched":
     case "model-switched":
@@ -143,7 +149,7 @@ function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] 
         }),
       ]
     case "assistant":
-      return assistant(message, model)
+      return assistant(message, model, reference)
     case "compaction":
       return [
         Message.make({
@@ -167,5 +173,8 @@ ${message.recent}
 }
 
 /** Translate projected V2 Session history into canonical @opencode-ai/llm context. */
-export const toLLMMessages = (messages: readonly SessionMessage.Message[], model: Model) =>
-  messages.flatMap((message) => toLLMMessage(message, model))
+export const toLLMMessages = (
+  messages: readonly SessionMessage.Message[],
+  model: Model,
+  reference: ModelReference = { providerID: model.provider, id: model.id },
+) => messages.flatMap((message) => toLLMMessage(message, model, reference))

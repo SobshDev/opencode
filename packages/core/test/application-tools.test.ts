@@ -6,6 +6,8 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { AgentV2 } from "@opencode-ai/core/agent"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { executeTool, settleTool, toolDefinitions } from "./lib/tool"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
@@ -16,6 +18,7 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node, ToolRegistry.toolsNode]), [
     [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+    [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
   ]),
 )
 
@@ -62,7 +65,16 @@ describe("ApplicationTools", () => {
           { type: "file", uri: "data:image/png;base64,aGVsbG8=", mime: "image/png", name: "result.png" },
         ],
       })
-      expect(contexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-opaque" }])
+      expect(contexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-opaque",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
     }),
   )
 
@@ -101,7 +113,16 @@ describe("ApplicationTools", () => {
           call: { type: "tool-call", id: "call-denied", name: "application_context", input: { query: "hello" } },
         }),
       ).toMatchObject({ result: { type: "content" } })
-      expect(contexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-denied" }])
+      expect(contexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-denied",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
     }),
   )
 
@@ -139,7 +160,16 @@ describe("ApplicationTools", () => {
           ],
         },
       })
-      expect(contexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-context" }])
+      expect(contexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-context",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
     }),
   )
 
@@ -252,8 +282,26 @@ describe("ApplicationTools", () => {
         call: { type: "tool-call", id: "call-first", name: "contextual", input: { query: "first" } },
       })
 
-      expect(secondContexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-second" }])
-      expect(firstContexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-first" }])
+      expect(secondContexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-second",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
+      expect(firstContexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-first",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
     }),
   )
 
@@ -280,7 +328,16 @@ describe("ApplicationTools", () => {
           call: { type: "tool-call", id: "call-shared", name: "shared", input: { query: "location" } },
         }),
       ).toMatchObject({ result: { type: "content" } })
-      expect(locationContexts).toEqual([{ sessionID, agent, assistantMessageID, toolCallID: "call-shared" }])
+      expect(locationContexts).toEqual([
+        {
+          sessionID,
+          agent,
+          assistantMessageID,
+          toolCallID: "call-shared",
+          location: expect.anything(),
+          abort: expect.anything(),
+        },
+      ])
       expect(applicationContexts).toEqual([])
     }),
   )

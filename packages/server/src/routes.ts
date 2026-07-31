@@ -11,6 +11,8 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
+import { ModelCallV2 } from "@opencode-ai/core/model-call"
+import { ModelCallTool } from "@opencode-ai/core/tool/model-call"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Layer, Option } from "effect"
@@ -29,6 +31,8 @@ const applicationServices = LayerNode.group([
   httpClient,
   ToolOutputStore.cleanupNode,
   SessionV2.node,
+  ModelCallV2.node,
+  ModelCallTool.node,
   PermissionSaved.node,
   PtyTicket.node,
   Credential.node,

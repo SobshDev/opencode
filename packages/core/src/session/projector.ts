@@ -41,6 +41,11 @@ function usage(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"] |
   return { cost: value.cost as Usage["cost"], tokens: value.tokens as Usage["tokens"] }
 }
 
+function messageUsage(message: SessionMessage.Message | undefined): Usage | undefined {
+  if (message?.type !== "assistant" || message.cost === undefined || message.tokens === undefined) return
+  return { cost: message.cost, tokens: message.tokens }
+}
+
 function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInsert {
   return {
     id: info.id,
@@ -60,6 +65,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     summary_files: info.summary?.files,
     summary_diffs: info.summary?.diffs ? [...info.summary.diffs] : undefined,
     metadata: info.metadata,
+    origin: info.origin,
+    permission_v2: info.permissionV2,
     cost: info.cost ?? 0,
     tokens_input: (info.tokens ?? { input: 0 }).input,
     tokens_output: (info.tokens ?? { output: 0 }).output,
@@ -109,26 +116,96 @@ function applyUsage(
     .pipe(Effect.orDie)
 }
 
+function recalculateUsage(db: DatabaseService, sessionID: (typeof SessionEvent.Step.Ended.Type)["data"]["sessionID"]) {
+  return Effect.gen(function* () {
+    const legacy = (yield* db
+      .select()
+      .from(PartTable)
+      .where(eq(PartTable.session_id, sessionID))
+      .all()
+      .pipe(Effect.orDie))
+      .map((row) => usage(row.data))
+      .filter((item): item is Usage => item !== undefined)
+    const current = (yield* db
+      .select()
+      .from(SessionMessageTable)
+      .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "assistant")))
+      .all()
+      .pipe(Effect.orDie))
+      .map((row) => decodeMessage({ ...row.data, id: row.id, type: row.type }))
+      .filter(
+        (message): message is SessionMessage.Assistant & Required<Pick<SessionMessage.Assistant, "cost" | "tokens">> =>
+          message.type === "assistant" && message.cost !== undefined && message.tokens !== undefined,
+      )
+      .map((message) => ({ cost: message.cost, tokens: message.tokens }))
+    const total = [...legacy, ...current].reduce<Usage>(
+      (sum, item) => ({
+        cost: sum.cost + item.cost,
+        tokens: {
+          input: sum.tokens.input + item.tokens.input,
+          output: sum.tokens.output + item.tokens.output,
+          reasoning: sum.tokens.reasoning + item.tokens.reasoning,
+          cache: {
+            read: sum.tokens.cache.read + item.tokens.cache.read,
+            write: sum.tokens.cache.write + item.tokens.cache.write,
+          },
+        },
+      }),
+      { cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    )
+    yield* db
+      .update(SessionTable)
+      .set({
+        cost: total.cost,
+        tokens_input: total.tokens.input,
+        tokens_output: total.tokens.output,
+        tokens_reasoning: total.tokens.reasoning,
+        tokens_cache_read: total.tokens.cache.read,
+        tokens_cache_write: total.tokens.cache.write,
+        time_updated: sql`${SessionTable.time_updated}`,
+      })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+  })
+}
+
 function run(db: DatabaseService, event: SessionEvent.Event) {
   return Effect.gen(function* () {
     const decodeRow = (row: typeof SessionMessageTable.$inferSelect) =>
       decodeMessage({ ...row.data, id: row.id, type: row.type })
-    const updateMessage = (message: SessionMessage.Message) => {
-      if (event.durable === undefined) return Effect.die("Durable Session event is missing aggregate sequence")
-      const encoded = encodeMessage(message)
-      const { id, type, ...data } = encoded
-      return db
-        .update(SessionMessageTable)
-        .set({ type, time_created: DateTime.toEpochMillis(message.time.created), data })
-        .where(
-          and(
-            eq(SessionMessageTable.id, SessionMessage.ID.make(id)),
-            eq(SessionMessageTable.session_id, event.data.sessionID),
-          ),
-        )
-        .run()
-        .pipe(Effect.orDie)
-    }
+    const updateMessage = (message: SessionMessage.Message) =>
+      Effect.gen(function* () {
+        if (event.durable === undefined) return yield* Effect.die("Durable Session event is missing aggregate sequence")
+        const encoded = encodeMessage(message)
+        const { id, type, ...data } = encoded
+        const row = yield* db
+          .select()
+          .from(SessionMessageTable)
+          .where(
+            and(
+              eq(SessionMessageTable.id, SessionMessage.ID.make(id)),
+              eq(SessionMessageTable.session_id, event.data.sessionID),
+            ),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(SessionMessageTable)
+          .set({ type, time_created: DateTime.toEpochMillis(message.time.created), data })
+          .where(
+            and(
+              eq(SessionMessageTable.id, SessionMessage.ID.make(id)),
+              eq(SessionMessageTable.session_id, event.data.sessionID),
+            ),
+          )
+          .run()
+          .pipe(Effect.orDie)
+        const previous = row ? messageUsage(decodeRow(row)) : undefined
+        const next = messageUsage(message)
+        if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
+        if (next) yield* applyUsage(db, event.data.sessionID, next)
+      })
     const appendMessage = (message: SessionMessage.Message) => insertMessage(db, event, message)
     const adapter: SessionMessageUpdater.Adapter = {
       getCurrentAssistant() {
@@ -443,6 +520,7 @@ const layer = Layer.effectDiscard(
           )
           .run()
           .pipe(Effect.orDie)
+        yield* recalculateUsage(db, event.data.sessionID)
         yield* db
           .update(SessionTable)
           .set({ revert: null, time_updated: DateTime.toEpochMillis(event.data.timestamp) })

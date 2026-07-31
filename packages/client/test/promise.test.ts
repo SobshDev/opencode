@@ -9,6 +9,7 @@ test("exposes every standard HTTP API group", () => {
     "location",
     "agents",
     "sessions",
+    "modelCall",
     "messages",
     "models",
     "providers",
@@ -24,6 +25,7 @@ test("exposes every standard HTTP API group", () => {
     "references",
     "projectCopies",
   ])
+  expect(Object.keys(client.modelCall)).toEqual(["list", "get", "cancel", "detach"])
   expect(Object.keys(client.messages)).toEqual(["list"])
   expect(Object.keys(client.integrations)).toEqual([
     "list",

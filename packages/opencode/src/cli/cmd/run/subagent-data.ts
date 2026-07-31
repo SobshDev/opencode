@@ -45,7 +45,16 @@ export type SubagentData = {
 export type BootstrapSubagentInput = {
   data: SubagentData
   messages: SessionMessage[]
-  children: Array<{ id: string; title?: string }>
+  children: Array<{
+    id: string
+    title?: string
+    model?: unknown
+    metadata?: unknown
+    origin?: unknown
+    cost?: unknown
+    tokens?: unknown
+  }>
+  modelCalls?: unknown[]
   permissions: PermissionRequest[]
   questions: QuestionRequest[]
 }
@@ -80,9 +89,16 @@ export function sameSubagentTab(a: FooterSubagentTab | undefined, b: FooterSubag
     a.sessionID === b.sessionID &&
     a.partID === b.partID &&
     a.callID === b.callID &&
+    a.kind === b.kind &&
+    a.modelCallID === b.modelCallID &&
+    a.modelCallParentSessionID === b.modelCallParentSessionID &&
     a.label === b.label &&
     a.description === b.description &&
     a.status === b.status &&
+    a.model === b.model &&
+    a.mode === b.mode &&
+    a.usage === b.usage &&
+    a.error === b.error &&
     a.background === b.background &&
     a.title === b.title &&
     a.toolCalls === b.toolCalls &&
@@ -137,6 +153,92 @@ function num(value: unknown): number | undefined {
   }
 
   return undefined
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined
+  }
+
+  return value as Record<string, unknown>
+}
+
+function modelLabel(value: unknown): string | undefined {
+  const model = record(value)
+  const providerID = text(model?.providerID)
+  const id = text(model?.id) ?? text(model?.modelID)
+  if (!providerID || !id) {
+    return undefined
+  }
+
+  const variant = text(model?.variant)
+  return `${providerID}/${id}${variant && variant !== "default" ? ` (${variant})` : ""}`
+}
+
+function usageLabel(value: unknown): string | undefined {
+  const usage = record(value)
+  if (!usage) {
+    return undefined
+  }
+
+  const tokens = record(usage.tokens)
+  const cache = record(tokens?.cache)
+  const total =
+    (num(tokens?.input) ?? 0) +
+    (num(tokens?.output) ?? 0) +
+    (num(tokens?.reasoning) ?? 0) +
+    (num(cache?.read) ?? 0) +
+    (num(cache?.write) ?? 0)
+  const cost = num(usage.cost)
+  const values = [
+    total > 0 ? `${Locale.number(total)} tokens` : undefined,
+    cost && cost > 0 ? costLabel(cost) : undefined,
+  ]
+  const label = values.filter((item): item is string => Boolean(item)).join(" · ")
+  return label || undefined
+}
+
+function costLabel(cost: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cost < 0.01 ? 4 : 2,
+    maximumFractionDigits: cost < 0.01 ? 4 : 2,
+  }).format(cost)
+}
+
+function errorLabel(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return text(value)
+  }
+
+  return text(record(value)?.message)
+}
+
+const modelCallStatuses = new Set<FooterSubagentTab["status"]>([
+  "preparing",
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+])
+
+function modelCallStatus(value: unknown): FooterSubagentTab["status"] | undefined {
+  const status = text(value) as FooterSubagentTab["status"] | undefined
+  return status && modelCallStatuses.has(status) ? status : undefined
+}
+
+function activeStatus(status: FooterSubagentTab["status"]) {
+  return status === "preparing" || status === "queued" || status === "running"
+}
+
+function statusRank(status: FooterSubagentTab["status"]) {
+  if (status === "preparing") return 0
+  if (status === "queued") return 1
+  if (status === "running") return 2
+  return 3
 }
 
 function inputLabel(input: Record<string, unknown>): string | undefined {
@@ -316,6 +418,7 @@ function taskTab(part: ToolPart, sessionID: string): FooterSubagentTab {
     sessionID,
     partID: part.id,
     callID: part.callID,
+    kind: "task",
     label,
     description,
     status: taskStatus(part),
@@ -326,16 +429,102 @@ function taskTab(part: ToolPart, sessionID: string): FooterSubagentTab {
   }
 }
 
-function taskSessionID(part: ToolPart) {
+function childSessionID(part: ToolPart) {
   return text(metadata(part, "sessionId")) ?? text(metadata(part, "sessionID"))
 }
 
-function syncTaskTab(data: SubagentData, part: ToolPart, children?: Set<string>) {
+function typedModelCallOrigin(child: BootstrapSubagentInput["children"][number]) {
+  const origin = record(child.origin)
+  if (
+    origin?.type !== "model_call" ||
+    !text(origin.callID) ||
+    !text(origin.parentSessionID) ||
+    !text(origin.parentAssistantMessageID) ||
+    !text(origin.parentToolCallID)
+  ) {
+    return undefined
+  }
+  return origin
+}
+
+function matchingModelCallMetadata(
+  child: BootstrapSubagentInput["children"][number],
+  origin: Record<string, unknown>,
+) {
+  const value = record(record(child.metadata)?.modelCall)
+  if (!value || text(value.callID) !== text(origin.callID)) return undefined
+  if (text(value.parentSessionID) && text(value.parentSessionID) !== text(origin.parentSessionID)) return undefined
+  if (
+    text(value.parentAssistantMessageID) &&
+    text(value.parentAssistantMessageID) !== text(origin.parentAssistantMessageID)
+  )
+    return undefined
+  if (text(value.parentToolCallID) && text(value.parentToolCallID) !== text(origin.parentToolCallID)) return undefined
+  if (value.requestedModel && !sameModelRef(value.requestedModel, origin.requestedModel)) return undefined
+  return value
+}
+
+function sameModelRef(left: unknown, right: unknown) {
+  const a = record(left)
+  const b = record(right)
+  return (
+    text(a?.providerID) === text(b?.providerID) &&
+    text(a?.id) === text(b?.id) &&
+    (text(a?.variant) ?? "default") === (text(b?.variant) ?? "default")
+  )
+}
+
+function matchingToolMetadata(part: ToolPart, callID: string) {
+  const value = "metadata" in part.state ? record(part.state.metadata) : undefined
+  return text(value?.callID) === callID ? value : undefined
+}
+
+function modelCallTab(
+  part: ToolPart,
+  child: BootstrapSubagentInput["children"][number],
+  origin: Record<string, unknown>,
+): FooterSubagentTab {
+  const callID = text(origin.callID)!
+  const trusted = matchingToolMetadata(part, callID)
+  const model = modelLabel(trusted?.actualModel) ?? modelLabel(child.model) ?? modelLabel(part.state.input.model) ?? "Model"
+  const status =
+    modelCallStatus(trusted?.status) ??
+    (part.state.status === "error"
+      ? trusted?.interrupted === true || text(part.state.error) === "Tool execution aborted"
+        ? "interrupted"
+        : "failed"
+      : part.state.status === "completed"
+        ? "completed"
+        : "running")
+  const background = trusted?.background === true || part.state.input.background === true
+  const prompt = text(part.state.input.prompt)?.split(/\r?\n/, 1)[0]
+
+  return {
+    sessionID: child.id,
+    partID: part.id,
+    callID: part.callID,
+    kind: "model_call",
+    modelCallID: callID,
+    modelCallParentSessionID: text(origin.parentSessionID),
+    label: model,
+    model,
+    description: stateTitle(part) ?? prompt ?? model,
+    status,
+    mode: background ? "background" : "foreground",
+    background,
+    usage: usageLabel(trusted?.usage),
+    error: errorLabel(trusted?.error) ?? (part.state.status === "error" ? text(part.state.error) : undefined),
+    title: stateTitle(part),
+    lastUpdatedAt: stateUpdatedAt(part),
+  }
+}
+
+function syncChildTab(data: SubagentData, part: ToolPart, children?: Set<string>) {
   if (part.tool !== "task") {
     return false
   }
 
-  const sessionID = taskSessionID(part)
+  const sessionID = childSessionID(part)
   if (!sessionID) {
     return false
   }
@@ -352,6 +541,132 @@ function syncTaskTab(data: SubagentData, part: ToolPart, children?: Set<string>)
 
   data.tabs.set(sessionID, next)
   ensureDetail(data, sessionID)
+  return true
+}
+
+function syncModelCallToolTab(
+  data: SubagentData,
+  part: ToolPart,
+  child: BootstrapSubagentInput["children"][number] | undefined,
+) {
+  if (part.tool !== "model_call" || !child) return false
+  const origin = typedModelCallOrigin(child)
+  if (
+    !origin ||
+    text(origin.parentToolCallID) !== part.callID ||
+    text(origin.parentAssistantMessageID) !== part.messageID
+  )
+    return false
+  const next = modelCallTab(part, child, origin)
+  const current = data.tabs.get(child.id)
+  const merged = current
+    ? {
+        ...current,
+        ...next,
+        status: statusRank(current.status) > statusRank(next.status) ? current.status : next.status,
+        usage: next.usage ?? current.usage,
+        error: next.error ?? current.error,
+      }
+    : next
+  if (sameSubagentTab(current, merged)) {
+    ensureDetail(data, child.id)
+    return false
+  }
+  data.tabs.set(child.id, merged)
+  ensureDetail(data, child.id)
+  return true
+}
+
+function modelCallInfoTab(
+  value: unknown,
+  child: BootstrapSubagentInput["children"][number],
+): FooterSubagentTab | undefined {
+  const info = record(value)
+  const origin = typedModelCallOrigin(child)
+  if (!info || !origin) return undefined
+  const callID = text(origin.callID)!
+  const parentSessionID = text(origin.parentSessionID)!
+  if ((text(info.id) ?? text(info.callID)) !== callID) return undefined
+  if (text(info.parentSessionID) !== parentSessionID) return undefined
+  if (text(info.childSessionID) !== child.id) return undefined
+  if (!sameModelRef(info.requestedModel, origin.requestedModel)) return undefined
+
+  const requested = info.requestedModel ?? origin.requestedModel
+  const model = modelLabel(info.actualModel) ?? modelLabel(child.model) ?? modelLabel(requested) ?? "Model"
+  const background = info.background === true || info.mode === "background"
+  const prompt = text(info.prompt)?.split(/\r?\n/, 1)[0]
+  const status = modelCallStatus(info.status) ?? "running"
+  const usage = usageLabel(info.usage) ?? usageLabel({ cost: child.cost, tokens: child.tokens })
+
+  return {
+    sessionID: child.id,
+    partID: `model-call:${callID}`,
+    callID: text(origin.parentToolCallID)!,
+    kind: "model_call",
+    modelCallID: callID,
+    modelCallParentSessionID: parentSessionID,
+    label: model,
+    model,
+    description: prompt ?? text(child.title) ?? model,
+    status,
+    mode: background ? "background" : "foreground",
+    background,
+    usage,
+    error: errorLabel(info.error),
+    title: text(child.title),
+    lastUpdatedAt: num(info.timeUpdated) ?? Date.now(),
+  }
+}
+
+function childModelCallTab(child: BootstrapSubagentInput["children"][number]) {
+  const origin = typedModelCallOrigin(child)
+  if (!origin) return undefined
+  const modelCall = matchingModelCallMetadata(child, origin)
+
+  return modelCallInfoTab(
+    {
+      ...modelCall,
+      callID: origin.callID,
+      parentSessionID: origin.parentSessionID,
+      childSessionID: child.id,
+      requestedModel: origin.requestedModel,
+      actualModel: modelCall?.actualModel ?? child.model ?? origin.requestedModel,
+      status: modelCall?.status,
+      usage:
+        modelCall?.usage ??
+        ({
+          cost: child.cost,
+          tokens: child.tokens,
+        } satisfies Record<string, unknown>),
+    },
+    child,
+  )
+}
+
+function syncModelCallInfo(data: SubagentData, value: unknown, child?: BootstrapSubagentInput["children"][number]) {
+  if (!child) return false
+  const hydrated = modelCallInfoTab(value, child)
+  if (!hydrated) {
+    return false
+  }
+
+  const current = data.tabs.get(hydrated.sessionID)
+  const next = current
+    ? {
+        ...hydrated,
+        partID: current.partID,
+        callID: current.callID,
+        description: current.description || hydrated.description,
+        title: current.title ?? hydrated.title,
+      }
+    : hydrated
+  if (sameSubagentTab(current, next)) {
+    ensureDetail(data, hydrated.sessionID)
+    return false
+  }
+
+  data.tabs.set(hydrated.sessionID, next)
+  ensureDetail(data, hydrated.sessionID)
   return true
 }
 
@@ -440,7 +755,7 @@ function ensureBlockerTab(
   const current = data.tabs.get(sessionID)
   if (current) {
     ensureDetail(data, sessionID)
-    if (current.status !== "running") {
+    if (!activeStatus(current.status)) {
       return false
     }
 
@@ -478,7 +793,7 @@ function isAbortedAssistantMessage(info: Message) {
 
 function cancelSubagentTab(data: SubagentData, sessionID: string) {
   const current = data.tabs.get(sessionID)
-  if (!current || current.status !== "running") {
+  if (!current || !activeStatus(current.status)) {
     return false
   }
 
@@ -666,13 +981,21 @@ function snapshotDetail(detail: DetailState) {
 
 export function listSubagentTabs(data: SubagentData) {
   return [...data.tabs.values()].sort((a, b) => {
-    const active = Number(b.status === "running") - Number(a.status === "running")
+    const active = Number(activeStatus(b.status)) - Number(activeStatus(a.status))
     if (active !== 0) {
       return active
     }
 
     return b.lastUpdatedAt - a.lastUpdatedAt
   })
+}
+
+export function modelCallAction(tab: FooterSubagentTab) {
+  if (tab.kind !== "model_call" || !tab.modelCallID || !tab.modelCallParentSessionID) return undefined
+  return {
+    sessionID: tab.modelCallParentSessionID,
+    callID: tab.modelCallID,
+  }
 }
 
 function snapshotQueues(data: SubagentData) {
@@ -709,6 +1032,7 @@ export function snapshotSelectedSubagentData(
 export function bootstrapSubagentData(input: BootstrapSubagentInput) {
   const child = new Map(input.children.map((item) => [item.id, item]))
   const children = new Set(child.keys())
+  const modelCallChildren = input.children.filter((item) => typedModelCallOrigin(item))
   let changed = false
 
   for (const message of input.messages) {
@@ -717,8 +1041,49 @@ export function bootstrapSubagentData(input: BootstrapSubagentInput) {
         continue
       }
 
-      changed = syncTaskTab(input.data, part, children) || changed
+      if (part.tool === "model_call") {
+        const target = modelCallChildren.find((item) => {
+          const origin = typedModelCallOrigin(item)!
+          return (
+            text(origin.parentAssistantMessageID) === part.messageID && text(origin.parentToolCallID) === part.callID
+          )
+        })
+        changed = syncModelCallToolTab(input.data, part, target) || changed
+        continue
+      }
+      changed = syncChildTab(input.data, part, children) || changed
     }
+  }
+
+  for (const item of input.children) {
+    const tab = childModelCallTab(item)
+    if (!tab) {
+      continue
+    }
+
+    const current = input.data.tabs.get(tab.sessionID)
+    if (current) {
+      const next = {
+        ...tab,
+        partID: current.partID,
+        callID: current.callID,
+        description: current.description || tab.description,
+        title: current.title ?? tab.title,
+      }
+      if (!sameSubagentTab(current, next)) {
+        input.data.tabs.set(tab.sessionID, next)
+        changed = true
+      }
+    } else {
+      input.data.tabs.set(tab.sessionID, tab)
+      changed = true
+    }
+    ensureDetail(input.data, tab.sessionID)
+  }
+
+  for (const item of input.modelCalls ?? []) {
+    const info = record(item)
+    changed = syncModelCallInfo(input.data, item, child.get(text(info?.childSessionID) ?? "")) || changed
   }
 
   for (const item of input.permissions) {
@@ -789,6 +1154,99 @@ export function bootstrapSubagentCalls(input: {
   return changed || beforeCallCount !== detail.data.call.size || queueChanged(detail.data, before)
 }
 
+function reduceModelCallEvent(data: SubagentData, event: Event, parentSessionID: string) {
+  const value = event as unknown as {
+    type?: unknown
+    properties?: unknown
+  }
+  const type = text(value.type)
+  if (!type?.startsWith("model.call.")) {
+    return false
+  }
+
+  const properties = record(value.properties)
+  const origin = record(properties?.origin)
+  const callID = text(properties?.callID) ?? text(origin?.callID)
+  if (!callID) {
+    return false
+  }
+
+  const current = [...data.tabs.values()].find((item) => item.modelCallID === callID)
+  if (!current?.modelCallParentSessionID || current.modelCallParentSessionID !== parentSessionID) return false
+
+  const status = (
+    {
+      "model.call.requested": "preparing",
+      "model.call.prepared": "preparing",
+      "model.call.queued": "queued",
+      "model.call.started": "running",
+      "model.call.completed": "completed",
+      "model.call.failed": "failed",
+      "model.call.cancelled": "cancelled",
+      "model.call.interrupted": "interrupted",
+    } as const
+  )[type]
+  if (!status && type !== "model.call.detached" && type !== "model.call.result-delivered") {
+    return false
+  }
+
+  const sessionID = current.sessionID
+
+  const requested = properties?.requestedModel ?? origin?.requestedModel
+  const model = modelLabel(properties?.actualModel) ?? modelLabel(requested) ?? current.model ?? "Model"
+  const background = type === "model.call.detached" || properties?.background === true || current.mode === "background"
+  const nextStatus =
+    status && statusRank(status) >= statusRank(current.status) ? status : current.status
+  const next: FooterSubagentTab = {
+    sessionID,
+    partID: current.partID,
+    callID: current.callID,
+    kind: "model_call",
+    modelCallID: callID,
+    modelCallParentSessionID: current.modelCallParentSessionID,
+    label: model,
+    model,
+    description: current.description,
+    status: nextStatus,
+    mode: background ? "background" : "foreground",
+    background,
+    usage: usageLabel(properties?.usage) ?? current.usage,
+    error: errorLabel(properties?.error) ?? current.error,
+    title: current.title,
+    lastUpdatedAt: Date.now(),
+  }
+  if (sameSubagentTab(current, next)) {
+    return false
+  }
+
+  data.tabs.set(sessionID, next)
+  ensureDetail(data, sessionID)
+  return true
+}
+
+function reduceModelCallSession(data: SubagentData, event: Event, parentSessionID: string) {
+  if (event.type !== "session.created" && event.type !== "session.updated") return false
+  const child = event.properties.info
+  const origin = typedModelCallOrigin(child)
+  if (!origin || child.parentID !== parentSessionID || text(origin.parentSessionID) !== parentSessionID) return false
+  const tab = childModelCallTab(child)
+  if (!tab) return false
+  const current = data.tabs.get(child.id)
+  const next = current
+    ? {
+        ...tab,
+        partID: current.partID,
+        callID: current.callID,
+        description: current.description || tab.description,
+        title: current.title ?? tab.title,
+      }
+    : tab
+  if (sameSubagentTab(current, next)) return false
+  data.tabs.set(child.id, next)
+  ensureDetail(data, child.id)
+  return true
+}
+
 export function reduceSubagentData(input: {
   data: SubagentData
   event: Event
@@ -797,6 +1255,8 @@ export function reduceSubagentData(input: {
   limits: Record<string, number>
 }) {
   const event = input.event
+  const modelCall = reduceModelCallEvent(input.data, event, input.sessionID)
+  const modelCallSession = reduceModelCallSession(input.data, event, input.sessionID)
 
   if (event.type === "message.part.updated") {
     const part = event.properties.part
@@ -805,7 +1265,28 @@ export function reduceSubagentData(input: {
         return false
       }
 
-      return syncTaskTab(input.data, part)
+      if (part.tool === "model_call") {
+        const current = [...input.data.tabs.values()].find(
+          (item) =>
+            item.kind === "model_call" &&
+            item.modelCallParentSessionID === input.sessionID &&
+            item.callID === part.callID,
+        )
+        const child = current
+          ? ({
+              id: current.sessionID,
+              origin: {
+                type: "model_call",
+                callID: current.modelCallID,
+                parentSessionID: current.modelCallParentSessionID,
+                parentAssistantMessageID: part.messageID,
+                parentToolCallID: part.callID,
+              },
+            } satisfies BootstrapSubagentInput["children"][number])
+          : undefined
+        return syncModelCallToolTab(input.data, part, child) || modelCall || modelCallSession
+      }
+      return syncChildTab(input.data, part) || modelCall || modelCallSession
     }
   }
 
@@ -825,7 +1306,7 @@ export function reduceSubagentData(input: {
         : undefined
 
   if (!sessionID || !knownSession(input.data, sessionID)) {
-    return false
+    return modelCall || modelCallSession
   }
 
   const detail = ensureDetail(input.data, sessionID)
@@ -835,7 +1316,7 @@ export function reduceSubagentData(input: {
       : false
   if (event.type === "session.status") {
     if (event.properties.status.type !== "retry") {
-      return cancelled
+      return cancelled || modelCall || modelCallSession
     }
 
     return (
@@ -847,7 +1328,10 @@ export function reduceSubagentData(input: {
           source: "system",
           messageID: `retry:${event.properties.status.attempt}`,
         },
-      ]) || cancelled
+      ]) ||
+      cancelled ||
+      modelCall ||
+      modelCallSession
     )
   }
 
@@ -871,6 +1355,9 @@ export function reduceSubagentData(input: {
       event,
       thinking: input.thinking,
       limits: input.limits,
-    }) || cancelled
+    }) ||
+    cancelled ||
+    modelCall ||
+    modelCallSession
   )
 }

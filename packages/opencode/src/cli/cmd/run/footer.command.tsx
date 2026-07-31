@@ -113,15 +113,15 @@ function subagentStatusLabel(status: FooterSubagentTab["status"]) {
     return "done"
   }
 
-  if (status === "cancelled") {
-    return "cancelled"
+  if (status === "failed" || status === "error") {
+    return "failed"
   }
 
-  if (status === "error") {
-    return "error"
+  if (status === "cancelled" || status === "interrupted") {
+    return status
   }
 
-  return "running"
+  return status
 }
 
 function handleKey(input: {
@@ -353,7 +353,9 @@ export function RunCommandMenuBody(props: {
   let field: InputRenderable | undefined
   const [query, setQuery] = createSignal("")
   const skills = createMemo(() => (props.commands() ?? []).filter((item) => item.source === "skill"))
-  const activeSubagentCount = createMemo(() => props.subagents().filter((item) => item.status === "running").length)
+  const activeSubagentCount = createMemo(
+    () => props.subagents().filter((item) => ["preparing", "queued", "running"].includes(item.status)).length,
+  )
   const entries = createMemo<CommandEntry[]>(() => {
     const builtins = ["editor", "new"]
     const session: CommandEntry[] = [

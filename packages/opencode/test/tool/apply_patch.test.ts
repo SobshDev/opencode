@@ -12,6 +12,7 @@ import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Truncate } from "@/tool/truncate"
 import { TestInstance } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { Tool } from "@/tool/tool"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
@@ -25,6 +26,7 @@ const baseCtx = {
   messageID: MessageID.make("msg_test"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

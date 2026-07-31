@@ -1,4 +1,6 @@
-import { DateTime } from "effect"
+import { ModelCall } from "@opencode-ai/schema/model-call"
+import { Permission } from "@opencode-ai/schema/permission"
+import { DateTime, Schema } from "effect"
 import { AgentV2 } from "../agent"
 import { Location } from "../location"
 import { ModelV2 } from "../model"
@@ -41,6 +43,8 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     }),
     subpath: row.path ? RelativePath.make(row.path) : undefined,
     revert: row.revert ? { ...row.revert, messageID: SessionMessage.ID.make(row.revert.messageID) } : undefined,
+    ...(Schema.is(ModelCall.Origin)(row.origin) ? { origin: row.origin } : {}),
+    ...(Schema.is(Permission.Ruleset)(row.permission_v2) ? { permission: row.permission_v2 } : {}),
     time: {
       created: DateTime.makeUnsafe(row.time_created),
       updated: DateTime.makeUnsafe(row.time_updated),

@@ -99,6 +99,7 @@ type ToolDefs = {
   apply_patch: typeof ApplyPatchTool
   batch: Tool.Info
   task: typeof TaskTool
+  model_call: Tool.Info
   todowrite: typeof TodoWriteTool
   question: typeof QuestionTool
   read: typeof ReadTool
@@ -374,6 +375,63 @@ function runTask(p: ToolProps<typeof TaskTool>): ToolInline {
   }
 }
 
+function modelRefLabel(value: unknown): string {
+  const model = dict(value)
+  const providerID = text(model.providerID)
+  const id = text(model.id) || text(model.modelID)
+  if (!providerID || !id) {
+    return "Model"
+  }
+
+  const variant = text(model.variant)
+  return `${providerID}/${id}${variant && variant !== "default" ? ` (${variant})` : ""}`
+}
+
+function modelCallStatus(p: ToolProps): string {
+  return text(p.frame.meta.status) || (p.frame.status === "error" ? "failed" : p.frame.status || "running")
+}
+
+function modelCallUsage(value: unknown): string {
+  const usage = dict(value)
+  const tokens = dict(usage.tokens)
+  const cache = dict(tokens.cache)
+  const total =
+    (num(tokens.input) ?? 0) +
+    (num(tokens.output) ?? 0) +
+    (num(tokens.reasoning) ?? 0) +
+    (num(cache.read) ?? 0) +
+    (num(cache.write) ?? 0)
+  const cost = num(usage.cost)
+  const values = [
+    total > 0 ? `${Locale.number(total)} tokens` : "",
+    cost && cost > 0 ? `$${cost.toFixed(cost < 0.01 ? 4 : 2)}` : "",
+  ]
+  return values.filter(Boolean).join(" · ")
+}
+
+function modelCallError(value: unknown): string {
+  return typeof value === "string" ? value : text(dict(value).message)
+}
+
+function runModelCall(p: ToolProps): ToolInline {
+  const model = modelRefLabel(p.frame.meta.actualModel ?? p.frame.input.model)
+  const status = modelCallStatus(p)
+  const background = p.frame.meta.background === true || p.frame.input.background === true
+  const icon =
+    status === "failed"
+      ? "✗"
+      : status === "cancelled" || status === "interrupted"
+        ? "○"
+        : status === "completed"
+          ? "✓"
+          : "•"
+  return {
+    icon,
+    title: model,
+    description: `${background ? "Background" : "Foreground"} · ${status}`,
+  }
+}
+
 function runTodo(p: ToolProps<typeof TodoWriteTool>): ToolInline {
   return {
     icon: "#",
@@ -578,6 +636,21 @@ function snapTask(p: ToolProps<typeof TaskTool>): ToolSnapshot {
     kind: "task",
     title: `# ${kind} Task`,
     rows,
+    tail: "",
+  }
+}
+
+function snapModelCall(p: ToolProps): Extract<ToolSnapshot, { kind: "task" }> {
+  const model = modelRefLabel(p.frame.meta.actualModel ?? p.frame.input.model)
+  const background = p.frame.meta.background === true || p.frame.input.background === true
+  const prompt = text(p.frame.input.prompt).split(/\r?\n/, 1)[0]
+  const usage = modelCallUsage(p.frame.meta.usage)
+  const error = modelCallError(p.frame.meta.error) || p.frame.error
+
+  return {
+    kind: "task",
+    title: `# Model Call · ${model}`,
+    rows: [`${background ? "background" : "foreground"} · ${modelCallStatus(p)}`, prompt, usage, error].filter(Boolean),
     tail: "",
   }
 }
@@ -788,6 +861,11 @@ function scrollTaskFinal(p: ToolProps<typeof TaskTool>): string {
   return `# ${kind} Task\n${row}`
 }
 
+function scrollModelCallFinal(p: ToolProps): string {
+  const snapshot = snapModelCall(p)
+  return [snapshot.title, ...snapshot.rows].join("\n")
+}
+
 function scrollTodoStart(_: ToolProps<typeof TodoWriteTool>): string {
   return ""
 }
@@ -984,6 +1062,17 @@ function permTask(p: ToolPermissionProps<typeof TaskTool>): ToolPermissionInfo {
   }
 }
 
+function permModelCall(p: ToolPermissionProps): ToolPermissionInfo {
+  const input = dict(p.input)
+  const model = modelRefLabel(input.model)
+  const prompt = text(input.prompt).split(/\r?\n/, 1)[0]
+  return {
+    icon: "#",
+    title: `Model Call · ${model}`,
+    lines: prompt ? [`◉ ${prompt}`] : [],
+  }
+}
+
 function permWebfetch(p: ToolPermissionProps<typeof WebFetchTool>): ToolPermissionInfo {
   const url = p.input.url || ""
   return {
@@ -1104,6 +1193,20 @@ const TOOL_RULES = {
       final: scrollTaskFinal,
     },
     permission: permTask,
+  },
+  model_call: {
+    view: {
+      output: false,
+      final: true,
+      snap: "structured",
+    },
+    run: runModelCall,
+    snap: snapModelCall,
+    scroll: {
+      start: () => "",
+      final: scrollModelCallFinal,
+    },
+    permission: permModelCall,
   },
   todowrite: {
     view: {

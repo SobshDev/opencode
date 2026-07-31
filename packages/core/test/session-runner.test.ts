@@ -55,6 +55,7 @@ import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ModelCall } from "@opencode-ai/schema/model-call"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -154,8 +155,10 @@ const echo = Layer.effectDiscard(
 const echoNode = makeLocationNode({ name: "test/session-runner-tools", layer: echo, deps: [ToolRegistry.node] })
 let modelResolveHook = Effect.void
 let currentModel = model
-const models = SessionRunnerModel.layerWith((session) =>
-  modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
+let modelSupportsTools = true
+const models = SessionRunnerModel.layerWith(
+  (session) => modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
+  () => modelSupportsTools,
 )
 const systemContextKey = SystemContext.Key.make("test/context")
 let systemBaseline = "Initial context"
@@ -318,6 +321,7 @@ const setup = Effect.gen(function* () {
   systemLoadHook = Effect.void
   modelResolveHook = Effect.void
   currentModel = model
+  modelSupportsTools = true
   skillBaselines.clear()
   responses = undefined
   streamFailure = undefined
@@ -593,6 +597,8 @@ describe("SessionRunnerLLM", () => {
           agent: AgentV2.ID.make("build"),
           assistantMessageID: expect.stringMatching(/^msg_/),
           toolCallID: "call-application",
+          location: expect.anything(),
+          abort: expect.anything(),
         },
       ])
       expect(yield* session.context(sessionID)).toMatchObject([
@@ -630,6 +636,39 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("publishes the canonical selected model when the provider API model ID differs", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const selected = ModelV2.Ref.make({
+        providerID: ProviderV2.ID.make("fake"),
+        id: ModelV2.ID.make("catalog-alias"),
+        variant: ModelV2.VariantID.make("high"),
+      })
+      currentModel = Model.make({
+        id: "provider-api-model",
+        provider: "fake",
+        route: OpenAIChat.route,
+      })
+      yield* session.switchModel({ sessionID, model: selected })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Use the aliased model" }),
+        resume: false,
+      })
+      response = fragmentFixture("text", "text-model-alias", ["Aliased response"]).completeEvents
+
+      yield* session.resume(sessionID)
+
+      expect(String(requests.at(-1)?.model.id)).toBe("provider-api-model")
+      expect((yield* session.context(sessionID)).find((message) => message.type === "assistant")).toMatchObject({
+        type: "assistant",
+        model: selected,
+        content: [{ type: "text", text: "Aliased response" }],
+      })
+    }),
+  )
+
   it.effect("streams one request with registry definitions from chronological V2 user history", () =>
     Effect.gen(function* () {
       yield* setup
@@ -652,6 +691,57 @@ describe("SessionRunnerLLM", () => {
         { role: "user", content: [{ type: "text", text: "Second" }] },
       ])
       expect(yield* session.messages({ sessionID })).toHaveLength(2)
+    }),
+  )
+
+  it.effect("omits tools for a non-tool model while preserving model-call structured output", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      const outputSchema = {
+        type: "object",
+        properties: { findings: { type: "array" } },
+        required: ["findings"],
+      }
+      const callID = ModelCall.CallID.create()
+      yield* db
+        .update(SessionTable)
+        .set({
+          origin: {
+            type: "model_call",
+            callID,
+            parentSessionID: SessionV2.ID.make("ses_non_tool_parent"),
+            parentAssistantMessageID: SessionMessage.ID.make("msg_non_tool_parent"),
+            parentToolCallID: "call-non-tool",
+            requestedModel: {
+              providerID: ProviderV2.ID.make("fake"),
+              id: ModelV2.ID.make("fake-model"),
+            },
+            outputSchema,
+          },
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      modelSupportsTools = false
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Return only structured findings" }),
+        resume: false,
+      })
+      requests.length = 0
+      response = fragmentFixture("text", "text-structured", ['{"findings":[]}']).completeEvents
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.tools).toEqual([])
+      expect(requests[0]?.responseFormat).toEqual({ type: "json", schema: outputSchema })
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Return only structured findings" },
+        { type: "assistant", content: [{ type: "text", text: '{"findings":[]}' }] },
+      ])
     }),
   )
 
