@@ -105,7 +105,8 @@ export const TaskTool = Tool.define(
       let current = parent
       let depth = 0
       while (current.parentID) {
-        depth++
+        // Model delegation has its own depth budget and should not consume subagent nesting.
+        if (current.origin?.type !== "model_call") depth++
         current = yield* sessions.get(current.parentID)
       }
       if (depth >= (cfg.subagent_depth ?? 1)) {

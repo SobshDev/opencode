@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -25,6 +25,8 @@ import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { ModelCall } from "@opencode-ai/schema/model-call"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -473,6 +475,130 @@ describe("tool.task", () => {
         expect((yield* sessions.get(result.metadata.sessionId)).parentID).toBe(child.id)
       }),
     { config: { subagent_depth: 2 } },
+  )
+
+  it.instance("does not count model-call parents toward subagent depth", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "model child",
+        origin: {
+          type: "model_call",
+          callID: ModelCall.CallID.create(),
+          parentSessionID: chat.id,
+          parentAssistantMessageID: SessionMessage.ID.make(assistant.id),
+          parentToolCallID: "call-model",
+          requestedModel: {
+            providerID: ref.providerID,
+            id: ref.modelID,
+          },
+        },
+      })
+      const childAssistant = yield* sessions.updateMessage({
+        ...assistant,
+        id: MessageID.ascending(),
+        parentID: MessageID.ascending(),
+        sessionID: child.id,
+      })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const result = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "find the cache key path",
+          subagent_type: "explore",
+        },
+        {
+          sessionID: child.id,
+          messageID: childAssistant.id,
+          agent: "build",
+          location: Tool.makeLocation("/tmp"),
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps() },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(yield* sessions.get(result.metadata.sessionId)).toMatchObject({
+        parentID: child.id,
+        agent: "explore",
+      })
+    }),
+  )
+
+  it.instance("still counts task parents across model-call sessions", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const explore = yield* sessions.create({ parentID: chat.id, title: "explore child", agent: "explore" })
+      const exploreAssistant = yield* sessions.updateMessage({
+        ...assistant,
+        id: MessageID.ascending(),
+        parentID: MessageID.ascending(),
+        sessionID: explore.id,
+      })
+      const child = yield* sessions.create({
+        parentID: explore.id,
+        title: "model child",
+        agent: "explore",
+        origin: {
+          type: "model_call",
+          callID: ModelCall.CallID.create(),
+          parentSessionID: explore.id,
+          parentAssistantMessageID: SessionMessage.ID.make(exploreAssistant.id),
+          parentToolCallID: "call-model",
+          requestedModel: {
+            providerID: ref.providerID,
+            id: ref.modelID,
+          },
+        },
+      })
+      const childAssistant = yield* sessions.updateMessage({
+        ...assistant,
+        id: MessageID.ascending(),
+        parentID: MessageID.ascending(),
+        sessionID: child.id,
+      })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let asked = false
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "find the cache key path",
+            subagent_type: "explore",
+          },
+          {
+            sessionID: child.id,
+            messageID: childAssistant.id,
+            agent: "explore",
+            location: Tool.makeLocation("/tmp"),
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.sync(() => (asked = true)),
+          },
+        )
+        .pipe(Effect.exit)
+
+      // The task-created ancestor must stay unmarked, otherwise the walk would skip it for the wrong reason.
+      expect(explore.origin).toBeUndefined()
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit))
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          message: 'Subagent depth limit reached (1). Increase "subagent_depth" to allow nested subagents.',
+        })
+      expect(asked).toBe(false)
+      expect(yield* sessions.children(child.id)).toHaveLength(0)
+    }),
   )
 
   it.instance(
