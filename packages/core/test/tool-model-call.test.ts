@@ -771,7 +771,7 @@ describe("ModelCallTool V2 orchestration", () => {
     Effect.gen(function* () {
       const { calls, sessions } = yield* setup
       yield* Effect.forEach(
-        [0, 1, 2, 3],
+        Array.from({ length: ModelCall.MAX_ACTIVE_CHILDREN }, (_, index) => index),
         (index) =>
           calls.reserve({
             parentSessionID: parentID,

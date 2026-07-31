@@ -377,9 +377,9 @@ const layer = Layer.effect(
         status: record.status,
         prompt: {
           exists: message !== undefined,
-          // Legacy persists an assistant row before entering processor/provider work.
-          // The user row alone therefore proves admission, not promotion.
-          promoted: false,
+          // Legacy persists the assistant row immediately before provider work. Its
+          // presence makes the outcome unknown after a crash, so never retry it.
+          promoted: assistant !== undefined,
         },
         assistant: {
           exists: assistant !== undefined,

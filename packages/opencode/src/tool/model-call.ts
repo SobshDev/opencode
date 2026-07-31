@@ -58,8 +58,8 @@ export const ModelCallTool = Tool.define(
       const title = callTitle(input)
       yield* ctx.ask({
         permission: "model_call",
-        patterns: ["*"],
-        always: ["*"],
+        patterns: [`${input.model.providerID}/${input.model.id}`],
+        always: [`${input.model.providerID}/${input.model.id}`],
         metadata: {
           model: input.model,
           background: input.background === true,

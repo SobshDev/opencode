@@ -714,7 +714,11 @@ const layer = Layer.effect(
               {
                 timestamp: yield* DateTime.now,
                 callID,
-                ...(error === undefined ? {} : { error }),
+                error: error ?? {
+                  code: "unknown_outcome",
+                  message: "The model call was interrupted before its outcome could be confirmed",
+                  outcomeUnknown: true,
+                },
                 ...(usage === undefined ? {} : { usage }),
               },
               { location: record.location },

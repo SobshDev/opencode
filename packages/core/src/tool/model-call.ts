@@ -92,8 +92,8 @@ const layer = Layer.effectDiscard(
         Effect.flatMap((permission) =>
           permission.assert({
             action: name,
-            resources: ["*"],
-            save: ["*"],
+            resources: [`${input.model.providerID}/${input.model.id}`],
+            save: [`${input.model.providerID}/${input.model.id}`],
             sessionID: context.sessionID,
             agent: context.agent,
             source: {
