@@ -5,15 +5,12 @@ import { optional } from "./schema"
 import { ProviderMetadata, ToolContent } from "./llm"
 import { Model } from "./model"
 import { FileAttachment, Prompt } from "./prompt"
-import { DateTimeUtcFromMillis, RelativePath, statics } from "./schema"
+import { DateTimeUtcFromMillis, RelativePath } from "./schema"
 import { SessionID } from "./session-id"
-import { ascending } from "./identifier"
+import { SessionMessageID } from "./session-message-id"
 
-export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
-  Schema.brand("Session.Message.ID"),
-  statics((schema) => ({ create: () => schema.make("msg_" + ascending()) })),
-)
-export type ID = typeof ID.Type
+export const ID = SessionMessageID
+export type ID = SessionMessageID
 
 export interface UnknownError extends Schema.Schema.Type<typeof UnknownError> {}
 export const UnknownError = Schema.Struct({
@@ -47,6 +44,7 @@ export const User = Schema.Struct({
   text: Prompt.fields.text,
   files: Prompt.fields.files,
   agents: Prompt.fields.agents,
+  internal: Prompt.fields.internal,
   type: Schema.Literal("user"),
 }).annotate({ identifier: "Session.Message.User" })
 

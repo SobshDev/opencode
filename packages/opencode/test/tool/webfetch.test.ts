@@ -21,6 +21,7 @@ const ctx = {
   messageID: MessageID.make("msg_message"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

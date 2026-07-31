@@ -11,6 +11,8 @@ import type {
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
+  SessionsChildrenInput,
+  SessionsChildrenOutput,
   SessionsSwitchAgentInput,
   SessionsSwitchAgentOutput,
   SessionsSwitchModelInput,
@@ -37,6 +39,14 @@ import type {
   SessionsInterruptOutput,
   SessionsMessageInput,
   SessionsMessageOutput,
+  ModelCallListInput,
+  ModelCallListOutput,
+  ModelCallGetInput,
+  ModelCallGetOutput,
+  ModelCallCancelInput,
+  ModelCallCancelOutput,
+  ModelCallDetachInput,
+  ModelCallDetachOutput,
   MessagesListInput,
   MessagesListOutput,
   ModelsListInput,
@@ -343,6 +353,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      children: (input: SessionsChildrenInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsChildrenOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/children`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       switchAgent: (input: SessionsSwitchAgentInput, requestOptions?: RequestOptions) =>
         request<SessionsSwitchAgentOutput>(
           {
@@ -486,6 +507,52 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/message/${encodeURIComponent(input.messageID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+    },
+    modelCall: {
+      list: (input: ModelCallListInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ModelCallListOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/model-call`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      get: (input: ModelCallGetInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ModelCallGetOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/model-call/${encodeURIComponent(input.callID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      cancel: (input: ModelCallCancelInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ModelCallCancelOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/model-call/${encodeURIComponent(input.callID)}/cancel`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      detach: (input: ModelCallDetachInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ModelCallDetachOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/model-call/${encodeURIComponent(input.callID)}/detach`,
             successStatus: 200,
             declaredStatuses: [404, 400, 401],
             empty: false,

@@ -14,6 +14,8 @@ import { iife } from "../../../util/iife"
 import { fail } from "../../effect-cmd"
 import { InstanceRef } from "@/effect/instance-ref"
 import type { InstanceContext } from "@/project/instance-context"
+import { Location } from "@opencode-ai/schema/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 export const debugAgent = Effect.fn("Cli.debug.agent")(function* (args: {
   name: string
@@ -177,6 +179,10 @@ const createToolContext = Effect.fn("Cli.debug.agent.createToolContext")(functio
     callID: PartID.ascending(),
     agent: agent.name,
     abort: new AbortController().signal,
+    location: Location.Ref.make({
+      directory: AbsolutePath.make(message.path.cwd),
+      ...(session.workspaceID === undefined ? {} : { workspaceID: session.workspaceID }),
+    }),
     messages: [],
     metadata: () => Effect.void,
     ask(req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) {

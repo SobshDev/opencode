@@ -514,6 +514,48 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("does not advertise tools to a model without tool-call capability", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      provider: {
+        test: {
+          ...cfg.provider.test,
+          models: {
+            "test-model": {
+              ...cfg.provider.test.models["test-model"],
+              tool_call: false,
+            },
+          },
+          options: {
+            ...cfg.provider.test.options,
+            baseURL: url,
+          },
+        },
+      },
+    }))
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "No tool calls",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* llm.text("world")
+
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    const hits = yield* llm.hits
+
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.body.tools).toBeUndefined()
+    expect(hits[0]?.body.tool_choice).toBeUndefined()
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>

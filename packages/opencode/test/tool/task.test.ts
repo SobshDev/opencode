@@ -17,6 +17,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -237,6 +238,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: { promptOps },
           messages: [],
@@ -274,6 +276,7 @@ describe("tool.task", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps, ...extra },
             messages: [],
@@ -333,6 +336,7 @@ describe("tool.task", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
+            location: Tool.makeLocation("/tmp"),
             abort: abort.signal,
             extra: { promptOps },
             messages: [],
@@ -371,6 +375,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: { promptOps },
           messages: [],
@@ -414,6 +419,7 @@ describe("tool.task", () => {
             sessionID: child.id,
             messageID: nestedAssistant.id,
             agent: "general",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps: stubOps() },
             messages: [],
@@ -455,6 +461,7 @@ describe("tool.task", () => {
             sessionID: child.id,
             messageID: nestedAssistant.id,
             agent: "general",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps: stubOps() },
             messages: [],
@@ -489,6 +496,7 @@ describe("tool.task", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps },
             messages: [],
@@ -554,6 +562,7 @@ describe("tool.task", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps: stubOps() },
             messages: [],
@@ -604,6 +613,7 @@ describe("tool.task", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
+            location: Tool.makeLocation("/tmp"),
             abort: new AbortController().signal,
             extra: { promptOps },
             messages: [],
@@ -651,6 +661,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: {
             promptOps: {
@@ -699,6 +710,7 @@ describe("tool.task", () => {
         sessionID: chat.id,
         messageID: assistant.id,
         agent: "build",
+        location: Tool.makeLocation("/tmp"),
         abort: new AbortController().signal,
         extra: { promptOps },
         messages: [],
@@ -763,6 +775,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: { promptOps: stubOps({ text: "background done" }) },
           messages: [],
@@ -796,6 +809,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: {
             promptOps: {
@@ -835,6 +849,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: {
             promptOps: {
@@ -874,6 +889,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: {
             promptOps: {
@@ -913,6 +929,7 @@ describe("tool.task", () => {
           sessionID: chat.id,
           messageID: assistant.id,
           agent: "build",
+          location: Tool.makeLocation("/tmp"),
           abort: new AbortController().signal,
           extra: {
             promptOps: {

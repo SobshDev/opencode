@@ -3,6 +3,7 @@ import { Schema } from "effect"
 import { Agent } from "../src/agent"
 import { FileSystem } from "../src/filesystem"
 import { Model } from "../src/model"
+import { ModelCall } from "../src/model-call"
 import { Project } from "../src/project"
 import { Pty } from "../src/pty"
 import { Question } from "../src/question"
@@ -41,6 +42,16 @@ describe("contract hygiene", () => {
       Model.Capabilities,
       Model.Cost,
       Model.Api,
+      ModelCall.Status,
+      ModelCall.Mode,
+      ModelCall.Error,
+      ModelCall.Usage,
+      ModelCall.Origin,
+      ModelCall.CallableModel,
+      ModelCall.ListInput,
+      ModelCall.ListResult,
+      ModelCall.CallInput,
+      ModelCall.CallResult,
       Project.Icon,
       Project.Commands,
       Project.Time,

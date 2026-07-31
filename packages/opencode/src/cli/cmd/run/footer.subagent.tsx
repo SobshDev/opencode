@@ -17,11 +17,11 @@ function statusColor(theme: RunFooterTheme, status: FooterSubagentTab["status"])
     return theme.highlight
   }
 
-  if (status === "cancelled") {
+  if (status === "cancelled" || status === "interrupted") {
     return theme.muted
   }
 
-  if (status === "error") {
+  if (status === "failed" || status === "error") {
     return theme.error
   }
 
@@ -33,11 +33,11 @@ function statusIcon(status: FooterSubagentTab["status"]) {
     return "●"
   }
 
-  if (status === "cancelled") {
+  if (status === "cancelled" || status === "interrupted") {
     return "○"
   }
 
-  if (status === "error") {
+  if (status === "failed" || status === "error") {
     return "◍"
   }
 
@@ -55,6 +55,8 @@ export function RunFooterSubagentBody(props: {
   diffStyle?: RunDiffStyle
   onCycle: (dir: -1 | 1) => void
   onClose: () => void
+  onCancel?: (tab: FooterSubagentTab) => void
+  onDetach?: (tab: FooterSubagentTab) => void
 }) {
   const theme = createMemo(() => props.theme())
   const footer = createMemo(() => theme().footer)
@@ -108,6 +110,35 @@ export function RunFooterSubagentBody(props: {
       return
     }
 
+    const current = tab()
+    if (
+      current?.kind === "model_call" &&
+      current.modelCallID &&
+      current.modelCallParentSessionID &&
+      event.ctrl &&
+      !event.meta &&
+      !event.shift &&
+      event.name === "c" &&
+      ["preparing", "queued", "running"].includes(current.status)
+    ) {
+      event.preventDefault()
+      props.onCancel?.(current)
+      return
+    }
+
+    if (
+      current?.kind === "model_call" &&
+      current.modelCallID &&
+      current.modelCallParentSessionID &&
+      current.mode === "foreground" &&
+      ["preparing", "queued", "running"].includes(current.status) &&
+      event.name === "b"
+    ) {
+      event.preventDefault()
+      props.onDetach?.(current)
+      return
+    }
+
     if (event.name === "up" || event.name === "k") {
       event.preventDefault()
       scroll?.scrollBy(-1)
@@ -125,28 +156,58 @@ export function RunFooterSubagentBody(props: {
       <box paddingTop={1} paddingLeft={1} paddingRight={3} paddingBottom={1} flexDirection="column" flexGrow={1}>
         <Show when={tab()}>
           {(current) => (
-            <box width="100%" flexDirection="row" gap={1} paddingBottom={1} flexShrink={0}>
-              {current().status === "running" ? (
-                <box flexShrink={0}>
-                  <spinner frames={SPINNER_FRAMES} interval={80} color={statusColor(footer(), current().status)} />
-                </box>
-              ) : (
-                <text fg={statusColor(footer(), current().status)} wrapMode="none" truncate flexShrink={0}>
-                  {statusIcon(current().status)}
+            <>
+              <box width="100%" flexDirection="row" gap={1} paddingBottom={1} flexShrink={0}>
+                {["preparing", "queued", "running"].includes(current().status) ? (
+                  <box flexShrink={0}>
+                    <spinner frames={SPINNER_FRAMES} interval={80} color={statusColor(footer(), current().status)} />
+                  </box>
+                ) : (
+                  <text fg={statusColor(footer(), current().status)} wrapMode="none" truncate flexShrink={0}>
+                    {statusIcon(current().status)}
+                  </text>
+                )}
+                <text fg={footer().text} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
+                  {title()}
+                  <Show when={subtitle().length > 0}>
+                    <span style={{ fg: footer().muted }}>{"  " + subtitle()}</span>
+                  </Show>
+                  <Show when={current().kind === "model_call"}>
+                    <span style={{ fg: footer().muted }}>
+                      {" · "}
+                      {current().mode ?? (current().background ? "background" : "foreground")}
+                      {" · "}
+                      {current().status}
+                    </span>
+                  </Show>
                 </text>
-              )}
-              <text fg={footer().text} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
-                {title()}
-                <Show when={subtitle().length > 0}>
-                  <span style={{ fg: footer().muted }}>{"  " + subtitle()}</span>
+                <Show when={props.total() > 1 && props.index() > 0}>
+                  <text fg={footer().muted} wrapMode="none" truncate flexShrink={0}>
+                    {props.index()} of {props.total()}
+                  </text>
                 </Show>
-              </text>
-              <Show when={props.total() > 1 && props.index() > 0}>
-                <text fg={footer().muted} wrapMode="none" truncate flexShrink={0}>
-                  {props.index()} of {props.total()}
+              </box>
+              <Show when={current().usage || current().error}>
+                <text fg={current().error ? footer().error : footer().muted} wrapMode="word">
+                  {[current().usage, current().error].filter(Boolean).join(" · ")}
                 </text>
               </Show>
-            </box>
+              <Show
+                when={
+                  current().kind === "model_call" &&
+                  current().modelCallID &&
+                  current().modelCallParentSessionID &&
+                  ["preparing", "queued", "running"].includes(current().status)
+                }
+              >
+                <text fg={footer().muted} wrapMode="none">
+                  ctrl+c cancel
+                  <Show when={current().mode === "foreground"}>
+                    <span> · b background</span>
+                  </Show>
+                </text>
+              </Show>
+            </>
           )}
         </Show>
         <scrollbox

@@ -3,13 +3,22 @@ export * as ToolRegistry from "./registry"
 import { ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@opencode-ai/llm"
 import { Context, Effect, Layer, Scope } from "effect"
 import { AgentV2 } from "../agent"
+import { Location } from "../location"
 import { PermissionV2 } from "../permission"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ToolOutputStore } from "../tool-output-store"
 import { Wildcard } from "../util/wildcard"
 import { ApplicationTools } from "./application-tools"
-import { definition, permission, settle, validateName, type AnyTool, type RegistrationError } from "./tool"
+import {
+  definition,
+  outputPolicy,
+  permission,
+  settle,
+  validateName,
+  type AnyTool,
+  type RegistrationError,
+} from "./tool"
 import { Tools } from "./tools"
 import { makeLocationNode } from "../effect/app-node"
 
@@ -43,6 +52,7 @@ const registryLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const applications = yield* ApplicationTools.Service
+    const location = yield* Location.Service
     const resources = yield* ToolOutputStore.Service
     type Registration = { readonly identity: object; readonly tool: AnyTool }
     const local = new Map<string, Array<{ readonly token: object; readonly registration: Registration }>>()
@@ -59,12 +69,19 @@ const registryLayer = Layer.effect(
         }
       if (advertised && registration.identity !== advertised)
         return { result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
+      const controller = new AbortController()
       const pending = yield* settle(registration.tool, input.call, {
         sessionID: input.sessionID,
         agent: input.agent,
+        location: Location.Ref.make({
+          directory: location.directory,
+          workspaceID: location.workspaceID,
+        }),
+        abort: controller.signal,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
       }).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => controller.abort())),
         Effect.map((output) => ({ output })),
         Effect.catchTag("LLM.ToolFailure", (failure) =>
           Effect.succeed({ result: { type: "error" as const, value: failure.message } }),
@@ -72,13 +89,16 @@ const registryLayer = Layer.effect(
       )
       if ("result" in pending) return pending
       const output = pending.output
-      const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
-      const result = ToolOutput.toResultValue(bounded.output)
+      const retained =
+        outputPolicy(registration.tool) === "preserve"
+          ? { output, outputPaths: [] }
+          : yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
+      const result = ToolOutput.toResultValue(retained.output)
       if (result.type === "error")
-        return bounded.outputPaths.length > 0 ? { result, outputPaths: bounded.outputPaths } : { result }
-      return bounded.outputPaths.length > 0
-        ? { result, output: bounded.output, outputPaths: bounded.outputPaths }
-        : { result, output: bounded.output }
+        return retained.outputPaths.length > 0 ? { result, outputPaths: retained.outputPaths } : { result }
+      return retained.outputPaths.length > 0
+        ? { result, output: retained.output, outputPaths: retained.outputPaths }
+        : { result, output: retained.output }
     })
 
     return Service.of({
@@ -137,11 +157,11 @@ function whollyDisabled(action: string, rules: PermissionV2.Ruleset) {
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node],
+  deps: [ApplicationTools.node, Location.node, ToolOutputStore.node],
 })
 
 export const toolsNode = makeLocationNode({
   service: Tools.Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node],
+  deps: [ApplicationTools.node, Location.node, ToolOutputStore.node],
 })

@@ -310,6 +310,189 @@ Each question includes a header, the question text, and a list of options. Users
 
 ---
 
+### models
+
+Search the models that the current session can call with [`model_call`](#model_call).
+
+All fields are optional:
+
+| Field        | Type      | Description                                                                                  |
+| ------------ | --------- | -------------------------------------------------------------------------------------------- |
+| `query`      | string    | Search provider IDs, model IDs, display names, families, and variant names.                  |
+| `providerID` | string    | Return only models from this exact provider.                                                 |
+| `tools`      | boolean   | Filter by whether the target model supports tool calls.                                      |
+| `limit`      | integer   | Number of results to return. Defaults to `20` and cannot exceed `50`.                         |
+| `cursor`     | string    | Continue a search using the exact `nextCursor` returned by the previous call.                 |
+
+For example:
+
+```json
+{
+  "query": "codex",
+  "providerID": "openai",
+  "tools": true,
+  "limit": 20
+}
+```
+
+Results are deterministic and paginated. Each item contains a canonical structured model reference and its available variants:
+
+```json
+{
+  "ref": {
+    "providerID": "openai",
+    "id": "gpt-5.1-codex"
+  },
+  "variants": ["high"]
+}
+```
+
+Copy the `ref` returned by `models` into `model_call`. To request a variant, add one of that same item's `variants` to the copied reference; do not combine a provider ID, model ID, and variant from different results.
+
+The result contains only connected, enabled, text-capable models that OpenCode can resolve in the current runtime. It exposes display and family names, variants, capabilities, context and output limits, status, and cost. Provider URLs, credentials, headers, request bodies, and provider settings are never returned.
+
+:::note
+This is a model-facing discovery tool. The terminal commands [`opencode models`](/docs/cli#models) and [`/models`](/docs/tui#models) remain available for listing and selecting models.
+:::
+
+---
+
+### model_call
+
+Delegate a prompt to an exact model in a fresh child session.
+
+```json
+{
+  "model": {
+    "providerID": "openai",
+    "id": "gpt-5.1-codex",
+    "variant": "high"
+  },
+  "prompt": "Review the current diff. Report correctness, security, and test gaps with file and line references.",
+  "background": false
+}
+```
+
+`model.providerID` and `model.id` are required. `model.variant` is optional. Selection is exact: OpenCode never fuzzy-selects a model or silently falls back to another one. Use [`models`](#models) first when the reference is not already known.
+
+`prompt` is required. `background` defaults to `false`. You can also provide `output_schema` with an object-root JSON Schema when the caller needs structured data:
+
+```json
+{
+  "model": {
+    "providerID": "anthropic",
+    "id": "claude-sonnet-4-5-20250929"
+  },
+  "prompt": "Review the current diff and return the findings.",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "severity": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["severity", "summary"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["findings"],
+    "additionalProperties": false
+  }
+}
+```
+
+OpenCode validates structured output. If a model does not support native structured output, OpenCode requests JSON and can make one corrective child turn before returning a validation failure.
+
+#### Child context
+
+Every call creates a new child session. It uses the caller's selected agent, system context, tools, permission overlay, step policy, Location, and workspace; only the model changes. The parent transcript and generated summaries are not copied into the child, so include everything the target needs in `prompt`.
+
+The child and parent use the same live workspace. Changes made by either session are immediately visible to the other, and the called model may edit files when its inherited tools and permissions allow it.
+
+:::caution
+Independent model review does not imply a read-only or isolated workspace. Ask the child only to review, or configure suitable edit and shell permissions, when it must not change files.
+:::
+
+Model calls may be nested to depth `2`; an attempt to create a depth-`3` child is rejected. A session can have at most 20 active direct model-call children at once. Calling the same model more than once is allowed, but each invocation still receives a fresh session.
+
+Only a tool-capable model can invoke `model_call`. A connected text-capable model without tool support can still be a target.
+
+#### Foreground review
+
+A foreground call waits for the child to finish and returns its ordered final text, structured value when requested, usage and cost, status, and parent/child session IDs. A useful prompt to the parent model is:
+
+```text
+Use models to find an available model from a different provider. Call it in the foreground to review the current diff independently, then assess its findings before responding.
+```
+
+Interrupting the parent also interrupts and cancels its foreground child. A foreground call can be detached to continue in the background.
+
+#### Parallel independent reviews
+
+The caller can start multiple model calls concurrently. For example, it can issue these two independent foreground calls in parallel:
+
+```json title="Review A"
+{
+  "model": {
+    "providerID": "anthropic",
+    "id": "claude-sonnet-4-5-20250929"
+  },
+  "prompt": "Independently review the current diff. Focus on correctness and edge cases. Do not edit files."
+}
+```
+
+```json title="Review B"
+{
+  "model": {
+    "providerID": "openai",
+    "id": "gpt-5.1-codex",
+    "variant": "high"
+  },
+  "prompt": "Independently review the current diff. Focus on security and missing tests. Do not edit files."
+}
+```
+
+Each reviewer starts without the parent's conversation or the other reviewer's result. After both calls settle, the parent can compare their findings.
+
+#### Background delegation
+
+Set `background` to `true` when the parent should keep working:
+
+```json
+{
+  "model": {
+    "providerID": "openai",
+    "id": "gpt-5.1-codex"
+  },
+  "prompt": "Investigate the flaky integration test, implement a focused fix, and run the relevant tests.",
+  "background": true
+}
+```
+
+The tool returns immediately with the call ID, child session ID, actual model, and current status. Interrupting the parent does not cancel a background child. When the child settles, OpenCode delivers its result exactly once to the parent at the next safe conversation boundary and wakes an idle parent. The terminal child-session card can be used to inspect, navigate to, or cancel the work.
+
+The `model_call` permission controls whether a model may delegate:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "model_call": "ask"
+  }
+}
+```
+
+:::note
+`model_call` does not replace the `task` tool. `task` continues to invoke configured, named [subagents](/docs/agents/#subagents) with their own agent profiles; use `model_call` when the target is an exact model reference.
+:::
+
+---
+
 ## Custom tools
 
 Custom tools let you define your own functions that the LLM can call. These are defined in your config file and can execute arbitrary code.

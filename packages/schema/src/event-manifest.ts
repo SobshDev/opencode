@@ -11,6 +11,7 @@ import { LegacyEvent } from "./legacy-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
 import { ModelsDev } from "./models-dev"
+import { ModelCall } from "./model-call"
 import { Permission } from "./permission"
 import { PermissionV1 } from "./permission-v1"
 import { Plugin } from "./plugin"
@@ -34,7 +35,11 @@ import { WorktreeEvent } from "./worktree-event"
 const sessionV1DurableDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable !== undefined)
 const sessionV1LiveDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable === undefined)
 
-const coreDefinitions = Event.inventory(...sessionV1DurableDefinitions, ...SessionEvent.Definitions)
+const coreDefinitions = Event.inventory(
+  ...sessionV1DurableDefinitions,
+  ...SessionEvent.Definitions,
+  ...ModelCall.Event.Definitions,
+)
 
 const foundationDefinitions = Event.inventory(
   ...ModelsDev.Event.Definitions,

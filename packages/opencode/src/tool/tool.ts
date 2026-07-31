@@ -7,6 +7,8 @@ import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { Agent } from "@/agent/agent"
+import { Location } from "@opencode-ai/schema/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 interface Metadata {
   [key: string]: any
@@ -38,11 +40,16 @@ export type Context<M extends Metadata = Metadata> = {
   messageID: MessageID
   agent: string
   abort: AbortSignal
+  location: Location.Ref
   callID?: string
   extra?: { [key: string]: unknown }
   messages: SessionV1.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
+}
+
+export function makeLocation(directory: string) {
+  return Location.Ref.make({ directory: AbsolutePath.make(directory) })
 }
 
 export interface ExecuteResult<M extends Metadata = Metadata> {

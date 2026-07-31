@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { ModelCall } from "@opencode-ai/schema/model-call"
 
 export class InvalidRequestError extends Schema.TaggedErrorClass<InvalidRequestError>()(
   "InvalidRequestError",
@@ -66,6 +67,15 @@ export class MessageNotFoundError extends Schema.TaggedErrorClass<MessageNotFoun
   {
     sessionID: Schema.String,
     messageID: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class ModelCallNotFoundError extends Schema.TaggedErrorClass<ModelCallNotFoundError>()(
+  "ModelCallNotFoundError",
+  {
+    callID: ModelCall.CallID,
     message: Schema.String,
   },
   { httpApiStatus: 404 },

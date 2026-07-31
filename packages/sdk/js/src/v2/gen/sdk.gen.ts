@@ -297,6 +297,14 @@ import type {
   V2IntegrationListResponses,
   V2LocationGetErrors,
   V2LocationGetResponses,
+  V2ModelCallCancelErrors,
+  V2ModelCallCancelResponses,
+  V2ModelCallDetachErrors,
+  V2ModelCallDetachResponses,
+  V2ModelCallGetErrors,
+  V2ModelCallGetResponses,
+  V2ModelCallListErrors,
+  V2ModelCallListResponses,
   V2ModelListErrors,
   V2ModelListResponses,
   V2PermissionRequestListErrors,
@@ -335,6 +343,8 @@ import type {
   V2ReferenceListResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionChildrenErrors,
+  V2SessionChildrenResponses,
   V2SessionCompactErrors,
   V2SessionCompactResponses,
   V2SessionContextErrors,
@@ -5537,6 +5547,25 @@ export class Session3 extends HeyApiClient {
   }
 
   /**
+   * List child sessions
+   *
+   * List the direct child Sessions created by a Session.
+   */
+  public children<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionChildrenResponses, V2SessionChildrenErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/children",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Switch session agent
    *
    * Switch the agent used by subsequent provider turns.
@@ -5870,6 +5899,117 @@ export class Session3 extends HeyApiClient {
   private _question?: Question2
   get question(): Question2 {
     return (this._question ??= new Question2({ client: this.client }))
+  }
+}
+
+export class ModelCall extends HeyApiClient {
+  /**
+   * List model calls
+   *
+   * List durable model calls created directly by a Session.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2ModelCallListResponses, V2ModelCallListErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/model-call",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get model call
+   *
+   * Inspect one durable model call owned directly by a Session.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      callID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "callID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2ModelCallGetResponses, V2ModelCallGetErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/model-call/{callID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Cancel model call
+   *
+   * Atomically cancel a non-terminal model call owned by a Session and interrupt its child.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      callID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "callID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2ModelCallCancelResponses, V2ModelCallCancelErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/model-call/{callID}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Detach model call
+   *
+   * Move a foreground model call owned by a Session to background execution.
+   */
+  public detach<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      callID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "callID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2ModelCallDetachResponses, V2ModelCallDetachErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/model-call/{callID}/detach",
+      ...options,
+      ...params,
+    })
   }
 }
 
@@ -7006,6 +7146,11 @@ export class V2 extends HeyApiClient {
   private _session?: Session3
   get session(): Session3 {
     return (this._session ??= new Session3({ client: this.client }))
+  }
+
+  private _modelCall?: ModelCall
+  get modelCall(): ModelCall {
+    return (this._modelCall ??= new ModelCall({ client: this.client }))
   }
 
   private _model?: Model

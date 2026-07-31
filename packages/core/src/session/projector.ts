@@ -60,6 +60,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     summary_files: info.summary?.files,
     summary_diffs: info.summary?.diffs ? [...info.summary.diffs] : undefined,
     metadata: info.metadata,
+    origin: info.origin,
+    permission_v2: info.permissionV2,
     cost: info.cost ?? 0,
     tokens_input: (info.tokens ?? { input: 0 }).input,
     tokens_output: (info.tokens ?? { output: 0 }).output,
@@ -107,6 +109,65 @@ function applyUsage(
     .where(eq(SessionTable.id, sessionID))
     .run()
     .pipe(Effect.orDie)
+}
+
+function recalculateUsage(
+  db: DatabaseService,
+  sessionID: (typeof SessionEvent.Step.Ended.Type)["data"]["sessionID"],
+) {
+  return Effect.gen(function* () {
+    const legacy = (
+      yield* db.select().from(PartTable).where(eq(PartTable.session_id, sessionID)).all().pipe(Effect.orDie)
+    )
+      .map((row) => usage(row.data))
+      .filter((item): item is Usage => item !== undefined)
+    const current = (
+      yield* db
+        .select()
+        .from(SessionMessageTable)
+        .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "assistant")))
+        .all()
+        .pipe(Effect.orDie)
+    )
+      .map((row) => decodeMessage({ ...row.data, id: row.id, type: row.type }))
+      .filter(
+        (
+          message,
+        ): message is SessionMessage.Assistant &
+          Required<Pick<SessionMessage.Assistant, "cost" | "tokens">> =>
+          message.type === "assistant" && message.cost !== undefined && message.tokens !== undefined,
+      )
+      .map((message) => ({ cost: message.cost, tokens: message.tokens }))
+    const total = [...legacy, ...current].reduce<Usage>(
+      (sum, item) => ({
+        cost: sum.cost + item.cost,
+        tokens: {
+          input: sum.tokens.input + item.tokens.input,
+          output: sum.tokens.output + item.tokens.output,
+          reasoning: sum.tokens.reasoning + item.tokens.reasoning,
+          cache: {
+            read: sum.tokens.cache.read + item.tokens.cache.read,
+            write: sum.tokens.cache.write + item.tokens.cache.write,
+          },
+        },
+      }),
+      { cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    )
+    yield* db
+      .update(SessionTable)
+      .set({
+        cost: total.cost,
+        tokens_input: total.tokens.input,
+        tokens_output: total.tokens.output,
+        tokens_reasoning: total.tokens.reasoning,
+        tokens_cache_read: total.tokens.cache.read,
+        tokens_cache_write: total.tokens.cache.write,
+        time_updated: sql`${SessionTable.time_updated}`,
+      })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+  })
 }
 
 function run(db: DatabaseService, event: SessionEvent.Event) {
@@ -379,7 +440,12 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.Shell.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Shell.Ended, (event) => run(db, event))
     yield* events.project(SessionEvent.Step.Started, (event) => run(db, event))
-    yield* events.project(SessionEvent.Step.Ended, (event) => run(db, event))
+    yield* events.project(SessionEvent.Step.Ended, (event) =>
+      Effect.gen(function* () {
+        yield* run(db, event)
+        yield* recalculateUsage(db, event.data.sessionID)
+      }),
+    )
     yield* events.project(SessionEvent.Step.Failed, (event) => run(db, event))
     yield* events.project(SessionEvent.Text.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Text.Ended, (event) => run(db, event))
@@ -443,6 +509,7 @@ const layer = Layer.effectDiscard(
           )
           .run()
           .pipe(Effect.orDie)
+        yield* recalculateUsage(db, event.data.sessionID)
         yield* db
           .update(SessionTable)
           .set({ revert: null, time_updated: DateTime.toEpochMillis(event.data.timestamp) })

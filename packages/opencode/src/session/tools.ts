@@ -23,6 +23,8 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Location } from "@opencode-ai/schema/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -59,6 +61,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
     abort: options.abortSignal!,
+    location: Location.Ref.make({
+      directory: AbsolutePath.make(input.processor.message.path.cwd),
+      ...(input.session.workspaceID === undefined ? {} : { workspaceID: input.session.workspaceID }),
+    }),
     messageID: input.processor.message.id,
     callID: options.toolCallId,
     extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },

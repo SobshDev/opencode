@@ -189,9 +189,16 @@ export type FooterSubagentTab = {
   sessionID: string
   partID: string
   callID: string
+  kind?: "task" | "model_call"
+  modelCallID?: string
+  modelCallParentSessionID?: string
   label: string
   description: string
-  status: "running" | "completed" | "cancelled" | "error"
+  status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted" | "error"
+  model?: string
+  mode?: "foreground" | "background"
+  usage?: string
+  error?: string
   background?: boolean
   title?: string
   toolCalls?: number

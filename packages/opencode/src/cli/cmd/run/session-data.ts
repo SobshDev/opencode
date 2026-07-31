@@ -395,6 +395,24 @@ function syncQuestion(data: SessionData, part: ToolPart): FooterOutput | undefin
 }
 
 function toolStatus(part: ToolPart): string {
+  if (part.tool === "model_call") {
+    const state = part.state as {
+      input?: {
+        model?: unknown
+      }
+    }
+    const model = state.input?.model
+    if (model && typeof model === "object" && !Array.isArray(model)) {
+      const providerID = Reflect.get(model, "providerID")
+      const id = Reflect.get(model, "id")
+      if (typeof providerID === "string" && typeof id === "string") {
+        return `calling ${providerID}/${id}`
+      }
+    }
+
+    return "calling model"
+  }
+
   if (part.tool !== "task") {
     return `running ${part.tool}`
   }

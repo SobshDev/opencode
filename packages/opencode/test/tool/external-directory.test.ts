@@ -4,7 +4,7 @@ import { describe, expect } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import type { Tool } from "@/tool/tool"
+import { Tool } from "@/tool/tool"
 import { assertExternalDirectoryEffect } from "../../src/tool/external-directory"
 import { Filesystem } from "@/util/filesystem"
 import { TestInstance, tmpdirScoped } from "../fixture/fixture"
@@ -19,6 +19,7 @@ const baseCtx: Omit<Tool.Context, "ask"> = {
   messageID: MessageID.make("msg_test"),
   callID: "",
   agent: "build",
+  location: Tool.makeLocation("/tmp"),
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,

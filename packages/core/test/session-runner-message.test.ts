@@ -327,6 +327,38 @@ Recent work
     ])
   })
 
+  test("restores provider metadata through a canonical catalog alias", () => {
+    const messages = toLLMMessages(
+      [
+        SessionMessage.Assistant.make({
+          id: id("assistant-catalog-alias"),
+          type: "assistant",
+          agent: "build",
+          model: { id: ModelV2.ID.make("catalog-alias"), providerID: ProviderV2.ID.make("provider") },
+          content: [
+            SessionMessage.AssistantReasoning.make({
+              type: "reasoning",
+              id: "reasoning-catalog-alias",
+              text: "Think",
+              providerMetadata: { openai: { itemId: "rs_alias", reasoningEncryptedContent: "encrypted-state" } },
+            }),
+          ],
+          time: { created, completed: created },
+        }),
+      ],
+      Model.make({ id: "provider-api-model", provider: "provider", route: OpenAIChat.route }),
+      { providerID: "provider", id: "catalog-alias" },
+    )
+
+    expect(messages[0]?.content).toEqual([
+      {
+        type: "reasoning",
+        text: "Think",
+        providerMetadata: { openai: { itemId: "rs_alias", reasoningEncryptedContent: "encrypted-state" } },
+      },
+    ])
+  })
+
   test("drops provider-native continuation metadata from failed assistant turns", () => {
     const messages = toLLMMessages(
       [

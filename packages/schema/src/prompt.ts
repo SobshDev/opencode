@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { ModelCall } from "./model-call"
 import { optional } from "./schema"
 import { statics } from "./schema"
 
@@ -37,11 +38,21 @@ export const AgentAttachment = Schema.Struct({
   source: Source.pipe(optional),
 }).annotate({ identifier: "Prompt.AgentAttachment" })
 
+export interface ModelCallResult extends Schema.Schema.Type<typeof ModelCallResult> {}
+export const ModelCallResult = Schema.Struct({
+  type: Schema.Literal("model-call-result"),
+  result: Schema.suspend(() => ModelCall.CallResult),
+}).annotate({ identifier: "Prompt.ModelCallResult" })
+
+export const Internal = Schema.Union([ModelCallResult]).pipe(Schema.toTaggedUnion("type"))
+export type Internal = ModelCallResult
+
 export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({
   text: Schema.String,
   files: Schema.Array(FileAttachment).pipe(optional),
   agents: Schema.Array(AgentAttachment).pipe(optional),
+  internal: Internal.pipe(optional),
 })
   .annotate({ identifier: "Prompt" })
   .pipe(

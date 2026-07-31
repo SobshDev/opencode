@@ -48,6 +48,17 @@ export type Event =
   | EventSessionNextRevertStaged
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
+  | EventModelCallRequested
+  | EventModelCallPrepared
+  | EventModelCallQueued
+  | EventModelCallStarted
+  | EventModelCallCorrectionRequested
+  | EventModelCallCompleted
+  | EventModelCallFailed
+  | EventModelCallCancelled
+  | EventModelCallInterrupted
+  | EventModelCallDetached
+  | EventModelCallResultDelivered
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
@@ -205,6 +216,8 @@ export type Session = {
   metadata?: {
     [key: string]: unknown
   }
+  origin?: ModelCallOrigin
+  permissionV2?: PermissionV2Ruleset
   time: {
     created: number
     updated: number
@@ -389,6 +402,10 @@ export type TextPart = {
   }
   metadata?: {
     [key: string]: unknown
+  }
+  internal?: {
+    type: "model-call-result"
+    result: ModelCallCallResult
   }
 }
 
@@ -642,6 +659,7 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  internal?: PromptModelCallResult
 }
 
 export type Pty = {
@@ -1192,6 +1210,132 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "model.call.requested"
+        properties: {
+          timestamp: number
+          callID: string
+          origin: ModelCallOrigin
+          requestedModel: ModelRef
+          prompt: string
+          background: boolean
+          output_schema?: {
+            [key: string]: unknown
+          }
+          childSessionID: string
+          childPromptID: string
+          correctionPromptID: string
+          completionMessageID: string
+          agent: string
+          actualModel: ModelRef
+          location: LocationRef
+          permission: ModelCallPermissionSnapshot
+          runtime: "legacy" | "v2"
+          depth: number
+        }
+      }
+    | {
+        id: string
+        type: "model.call.prepared"
+        properties: {
+          timestamp: number
+          callID: string
+          childSessionID: string
+          childPromptID: string
+          completionMessageID: string
+          agent: string
+          actualModel: ModelRef
+          location: LocationRef
+          runtime: "legacy" | "v2"
+          depth: number
+          slot: number
+        }
+      }
+    | {
+        id: string
+        type: "model.call.queued"
+        properties: {
+          timestamp: number
+          callID: string
+        }
+      }
+    | {
+        id: string
+        type: "model.call.started"
+        properties: {
+          timestamp: number
+          callID: string
+        }
+      }
+    | {
+        id: string
+        type: "model.call.correction-requested"
+        properties: {
+          timestamp: number
+          callID: string
+          correctionPromptID: string
+          attempt: number
+          validationError: string
+        }
+      }
+    | {
+        id: string
+        type: "model.call.completed"
+        properties: {
+          timestamp: number
+          callID: string
+          text: string
+          structured?: unknown
+          usage: ModelCallUsage
+        }
+      }
+    | {
+        id: string
+        type: "model.call.failed"
+        properties: {
+          timestamp: number
+          callID: string
+          error: ModelCallError
+          text?: string
+          usage?: ModelCallUsage
+        }
+      }
+    | {
+        id: string
+        type: "model.call.cancelled"
+        properties: {
+          timestamp: number
+          callID: string
+          foregroundOnly?: boolean
+          usage?: ModelCallUsage
+        }
+      }
+    | {
+        id: string
+        type: "model.call.interrupted"
+        properties: {
+          timestamp: number
+          callID: string
+          usage?: ModelCallUsage
+        }
+      }
+    | {
+        id: string
+        type: "model.call.detached"
+        properties: {
+          timestamp: number
+          callID: string
+        }
+      }
+    | {
+        id: string
+        type: "model.call.result-delivered"
+        properties: {
+          timestamp: number
+          callID: string
+        }
+      }
+    | {
+        id: string
         type: "message.part.delta"
         properties: {
           sessionID: string
@@ -1636,6 +1780,17 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
+    | SyncEventModelCallRequested
+    | SyncEventModelCallPrepared
+    | SyncEventModelCallQueued
+    | SyncEventModelCallStarted
+    | SyncEventModelCallCorrectionRequested
+    | SyncEventModelCallCompleted
+    | SyncEventModelCallFailed
+    | SyncEventModelCallCancelled
+    | SyncEventModelCallInterrupted
+    | SyncEventModelCallDetached
+    | SyncEventModelCallResultDelivered
 }
 
 /**
@@ -2230,6 +2385,7 @@ export type GlobalSession = {
   metadata?: {
     [key: string]: unknown
   }
+  origin?: ModelCallOrigin
   time: {
     created: number
     updated: number
@@ -2540,10 +2696,388 @@ export type ProviderAuthError1 = {
   }
 }
 
+export type Session1 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session2 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
     message: string
+  }
+}
+
+export type Session3 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session4 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session5 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session6 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session7 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
   }
 }
 
@@ -2599,6 +3133,114 @@ export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
   message: string
+}
+
+export type Session8 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session9 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  origin?: ModelCallOrigin
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
 }
 
 export type EventTuiPromptAppend = {
@@ -2773,6 +3415,12 @@ export type SessionHistory = {
 
 export type SessionDurableEventStream = string
 
+export type ModelCallNotFoundError = {
+  _tag: "ModelCallNotFoundError"
+  callID: string
+  message: string
+}
+
 export type SessionMessagesResponse = {
   data: Array<SessionMessage>
   cursor: {
@@ -2896,6 +3544,17 @@ export type V2Event =
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
+  | ModelCallRequested
+  | ModelCallPrepared
+  | ModelCallQueued
+  | ModelCallStarted
+  | ModelCallCorrectionRequested
+  | ModelCallCompleted
+  | ModelCallFailed
+  | ModelCallCancelled
+  | ModelCallInterrupted
+  | ModelCallDetached
+  | ModelCallResultDelivered
   | MessagePartDelta
   | SessionDiff
   | SessionError
@@ -3041,6 +3700,65 @@ export type ModelRef = {
   variant?: string
 }
 
+export type ModelCallOrigin = {
+  type: "model_call"
+  callID: string
+  parentSessionID: string
+  parentAssistantMessageID: string
+  parentToolCallID: string
+  requestedModel: ModelRef
+  outputSchema?: {
+    [key: string]: unknown
+  }
+}
+
+export type PermissionV2Effect = "allow" | "deny" | "ask"
+
+export type PermissionV2Rule = {
+  action: string
+  resource: string
+  effect: PermissionV2Effect
+}
+
+export type PermissionV2Ruleset = Array<PermissionV2Rule>
+
+export type ModelCallMode = "foreground" | "background"
+
+export type ModelCallStatus = "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
+
+export type ModelCallError = {
+  code: string
+  message: string
+  outcomeUnknown?: boolean
+}
+
+export type ModelCallUsage = {
+  cost: number
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+}
+
+export type ModelCallCallResult = {
+  callID: string
+  parentSessionID: string
+  childSessionID: string
+  requestedModel: ModelRef
+  actualModel: ModelRef
+  mode: ModelCallMode
+  status: ModelCallStatus
+  text?: string
+  structured?: unknown
+  error?: ModelCallError
+  usage?: ModelCallUsage
+}
+
 export type LocationRef = {
   directory: string
   workspaceID?: string
@@ -3063,6 +3781,11 @@ export type PromptFileAttachment = {
 export type PromptAgentAttachment = {
   name: string
   source?: PromptSource
+}
+
+export type PromptModelCallResult = {
+  type: "model-call-result"
+  result: ModelCallCallResult
 }
 
 export type SessionErrorUnknown = {
@@ -3118,6 +3841,16 @@ export type RevertState = {
   diff?: string
   files?: Array<FileDiff>
 }
+
+export type ModelCallPermissionSnapshot =
+  | {
+      version: "legacy"
+      rules: PermissionRuleset
+    }
+  | {
+      version: "v2"
+      rules: PermissionV2Ruleset
+    }
 
 export type PermissionV2Source = {
   type: "tool"
@@ -3823,6 +4556,209 @@ export type SyncEventSessionNextRevertCommitted = {
   }
 }
 
+export type SyncEventModelCallRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      origin: ModelCallOrigin
+      requestedModel: ModelRef
+      prompt: string
+      background: boolean
+      output_schema?: {
+        [key: string]: unknown
+      }
+      childSessionID: string
+      childPromptID: string
+      correctionPromptID: string
+      completionMessageID: string
+      agent: string
+      actualModel: ModelRef
+      location: LocationRef
+      permission: ModelCallPermissionSnapshot
+      runtime: "legacy" | "v2"
+      depth: number
+    }
+  }
+}
+
+export type SyncEventModelCallPrepared = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.prepared.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      childSessionID: string
+      childPromptID: string
+      completionMessageID: string
+      agent: string
+      actualModel: ModelRef
+      location: LocationRef
+      runtime: "legacy" | "v2"
+      depth: number
+      slot: number
+    }
+  }
+}
+
+export type SyncEventModelCallQueued = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.queued.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+    }
+  }
+}
+
+export type SyncEventModelCallStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+    }
+  }
+}
+
+export type SyncEventModelCallCorrectionRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.correction-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      correctionPromptID: string
+      attempt: number
+      validationError: string
+    }
+  }
+}
+
+export type SyncEventModelCallCompleted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.completed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      text: string
+      structured?: unknown
+      usage: ModelCallUsage
+    }
+  }
+}
+
+export type SyncEventModelCallFailed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.failed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      error: ModelCallError
+      text?: string
+      usage?: ModelCallUsage
+    }
+  }
+}
+
+export type SyncEventModelCallCancelled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.cancelled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      foregroundOnly?: boolean
+      usage?: ModelCallUsage
+    }
+  }
+}
+
+export type SyncEventModelCallInterrupted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.interrupted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+      usage?: ModelCallUsage
+    }
+  }
+}
+
+export type SyncEventModelCallDetached = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.detached.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+    }
+  }
+}
+
+export type SyncEventModelCallResultDelivered = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "model.call.result-delivered.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      callID: string
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -3879,16 +4815,6 @@ export type ProviderRequest = {
 
 export type AgentColor = string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
 
-export type PermissionV2Effect = "allow" | "deny" | "ask"
-
-export type PermissionV2Rule = {
-  action: string
-  resource: string
-  effect: PermissionV2Effect
-}
-
-export type PermissionV2Ruleset = Array<PermissionV2Rule>
-
 export type AgentV2Info = {
   id: string
   model?: ModelRef
@@ -3927,6 +4853,8 @@ export type SessionV2Info = {
   location: LocationRef
   subpath?: string
   revert?: RevertState
+  origin?: ModelCallOrigin
+  permission?: PermissionV2Ruleset
 }
 
 export type PromptInputFileAttachment = {
@@ -3981,6 +4909,7 @@ export type SessionMessageUser = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  internal?: PromptModelCallResult
   type: "user"
 }
 
@@ -5297,6 +6226,242 @@ export type SessionNextCompactionDelta = {
     sessionID: string
     messageID: string
     text: string
+  }
+}
+
+export type ModelCallRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    origin: ModelCallOrigin
+    requestedModel: ModelRef
+    prompt: string
+    background: boolean
+    output_schema?: {
+      [key: string]: unknown
+    }
+    childSessionID: string
+    childPromptID: string
+    correctionPromptID: string
+    completionMessageID: string
+    agent: string
+    actualModel: ModelRef
+    location: LocationRef
+    permission: ModelCallPermissionSnapshot
+    runtime: "legacy" | "v2"
+    depth: number
+  }
+}
+
+export type ModelCallPrepared = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.prepared"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    childSessionID: string
+    childPromptID: string
+    completionMessageID: string
+    agent: string
+    actualModel: ModelRef
+    location: LocationRef
+    runtime: "legacy" | "v2"
+    depth: number
+    slot: number
+  }
+}
+
+export type ModelCallQueued = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.queued"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type ModelCallStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type ModelCallCorrectionRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.correction-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    correctionPromptID: string
+    attempt: number
+    validationError: string
+  }
+}
+
+export type ModelCallCompleted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.completed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    text: string
+    structured?: unknown
+    usage: ModelCallUsage
+  }
+}
+
+export type ModelCallFailed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.failed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    error: ModelCallError
+    text?: string
+    usage?: ModelCallUsage
+  }
+}
+
+export type ModelCallCancelled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.cancelled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    foregroundOnly?: boolean
+    usage?: ModelCallUsage
+  }
+}
+
+export type ModelCallInterrupted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.interrupted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+    usage?: ModelCallUsage
+  }
+}
+
+export type ModelCallDetached = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.detached"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type ModelCallResultDelivered = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model.call.result-delivered"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    callID: string
   }
 }
 
@@ -6649,6 +7814,143 @@ export type EventSessionNextRevertCommitted = {
     timestamp: number
     sessionID: string
     messageID: string
+  }
+}
+
+export type EventModelCallRequested = {
+  id: string
+  type: "model.call.requested"
+  properties: {
+    timestamp: number
+    callID: string
+    origin: ModelCallOrigin
+    requestedModel: ModelRef
+    prompt: string
+    background: boolean
+    output_schema?: {
+      [key: string]: unknown
+    }
+    childSessionID: string
+    childPromptID: string
+    correctionPromptID: string
+    completionMessageID: string
+    agent: string
+    actualModel: ModelRef
+    location: LocationRef
+    permission: ModelCallPermissionSnapshot
+    runtime: "legacy" | "v2"
+    depth: number
+  }
+}
+
+export type EventModelCallPrepared = {
+  id: string
+  type: "model.call.prepared"
+  properties: {
+    timestamp: number
+    callID: string
+    childSessionID: string
+    childPromptID: string
+    completionMessageID: string
+    agent: string
+    actualModel: ModelRef
+    location: LocationRef
+    runtime: "legacy" | "v2"
+    depth: number
+    slot: number
+  }
+}
+
+export type EventModelCallQueued = {
+  id: string
+  type: "model.call.queued"
+  properties: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type EventModelCallStarted = {
+  id: string
+  type: "model.call.started"
+  properties: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type EventModelCallCorrectionRequested = {
+  id: string
+  type: "model.call.correction-requested"
+  properties: {
+    timestamp: number
+    callID: string
+    correctionPromptID: string
+    attempt: number
+    validationError: string
+  }
+}
+
+export type EventModelCallCompleted = {
+  id: string
+  type: "model.call.completed"
+  properties: {
+    timestamp: number
+    callID: string
+    text: string
+    structured?: unknown
+    usage: ModelCallUsage
+  }
+}
+
+export type EventModelCallFailed = {
+  id: string
+  type: "model.call.failed"
+  properties: {
+    timestamp: number
+    callID: string
+    error: ModelCallError
+    text?: string
+    usage?: ModelCallUsage
+  }
+}
+
+export type EventModelCallCancelled = {
+  id: string
+  type: "model.call.cancelled"
+  properties: {
+    timestamp: number
+    callID: string
+    foregroundOnly?: boolean
+    usage?: ModelCallUsage
+  }
+}
+
+export type EventModelCallInterrupted = {
+  id: string
+  type: "model.call.interrupted"
+  properties: {
+    timestamp: number
+    callID: string
+    usage?: ModelCallUsage
+  }
+}
+
+export type EventModelCallDetached = {
+  id: string
+  type: "model.call.detached"
+  properties: {
+    timestamp: number
+    callID: string
+  }
+}
+
+export type EventModelCallResultDelivered = {
+  id: string
+  type: "model.call.result-delivered"
+  properties: {
+    timestamp: number
+    callID: string
   }
 }
 
@@ -9465,7 +10767,7 @@ export type SessionListResponses = {
   /**
    * List of sessions
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionListResponse = SessionListResponses[keyof SessionListResponses]
@@ -9507,7 +10809,7 @@ export type SessionCreateResponses = {
   /**
    * Successfully created session
    */
-  200: Session
+  200: Session3
 }
 
 export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
@@ -9605,7 +10907,7 @@ export type SessionGetResponses = {
   /**
    * Get session
    */
-  200: Session
+  200: Session2
 }
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
@@ -9648,7 +10950,7 @@ export type SessionUpdateResponses = {
   /**
    * Successfully updated session
    */
-  200: Session
+  200: Session4
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
@@ -9682,7 +10984,7 @@ export type SessionChildrenResponses = {
   /**
    * List of children
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
@@ -9951,7 +11253,7 @@ export type SessionForkResponses = {
   /**
    * 200
    */
-  200: Session
+  200: Session5
 }
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
@@ -10057,7 +11359,7 @@ export type SessionUnshareResponses = {
   /**
    * Successfully unshared session
    */
-  200: Session
+  200: Session7
 }
 
 export type SessionUnshareResponse = SessionUnshareResponses[keyof SessionUnshareResponses]
@@ -10095,7 +11397,7 @@ export type SessionShareResponses = {
   /**
    * Successfully shared session
    */
-  200: Session
+  200: Session6
 }
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
@@ -10324,7 +11626,7 @@ export type SessionRevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session8
 }
 
 export type SessionRevertResponse = SessionRevertResponses[keyof SessionRevertResponses]
@@ -10362,7 +11664,7 @@ export type SessionUnrevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session9
 }
 
 export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnrevertResponses]
@@ -11476,6 +12778,43 @@ export type V2SessionGetResponses = {
 
 export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
 
+export type V2SessionChildrenData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/children"
+}
+
+export type V2SessionChildrenErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionChildrenError = V2SessionChildrenErrors[keyof V2SessionChildrenErrors]
+
+export type V2SessionChildrenResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionV2Info>
+  }
+}
+
+export type V2SessionChildrenResponse = V2SessionChildrenResponses[keyof V2SessionChildrenResponses]
+
 export type V2SessionSwitchAgentData = {
   body: {
     agent: string
@@ -11984,6 +13323,157 @@ export type V2SessionMessageResponses = {
 }
 
 export type V2SessionMessageResponse = V2SessionMessageResponses[keyof V2SessionMessageResponses]
+
+export type V2ModelCallListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/model-call"
+}
+
+export type V2ModelCallListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2ModelCallListError = V2ModelCallListErrors[keyof V2ModelCallListErrors]
+
+export type V2ModelCallListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<ModelCallCallResult>
+  }
+}
+
+export type V2ModelCallListResponse = V2ModelCallListResponses[keyof V2ModelCallListResponses]
+
+export type V2ModelCallGetData = {
+  body?: never
+  path: {
+    sessionID: string
+    callID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/model-call/{callID}"
+}
+
+export type V2ModelCallGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError | ModelCallNotFoundError
+   */
+  404: ModelCallNotFoundError | SessionNotFoundError
+}
+
+export type V2ModelCallGetError = V2ModelCallGetErrors[keyof V2ModelCallGetErrors]
+
+export type V2ModelCallGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ModelCallCallResult
+  }
+}
+
+export type V2ModelCallGetResponse = V2ModelCallGetResponses[keyof V2ModelCallGetResponses]
+
+export type V2ModelCallCancelData = {
+  body?: never
+  path: {
+    sessionID: string
+    callID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/model-call/{callID}/cancel"
+}
+
+export type V2ModelCallCancelErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError | ModelCallNotFoundError
+   */
+  404: ModelCallNotFoundError | SessionNotFoundError
+}
+
+export type V2ModelCallCancelError = V2ModelCallCancelErrors[keyof V2ModelCallCancelErrors]
+
+export type V2ModelCallCancelResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ModelCallCallResult
+  }
+}
+
+export type V2ModelCallCancelResponse = V2ModelCallCancelResponses[keyof V2ModelCallCancelResponses]
+
+export type V2ModelCallDetachData = {
+  body?: never
+  path: {
+    sessionID: string
+    callID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/model-call/{callID}/detach"
+}
+
+export type V2ModelCallDetachErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError | ModelCallNotFoundError
+   */
+  404: ModelCallNotFoundError | SessionNotFoundError
+}
+
+export type V2ModelCallDetachError = V2ModelCallDetachErrors[keyof V2ModelCallDetachErrors]
+
+export type V2ModelCallDetachResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ModelCallCallResult
+  }
+}
+
+export type V2ModelCallDetachResponse = V2ModelCallDetachResponses[keyof V2ModelCallDetachResponses]
 
 export type V2SessionMessagesData = {
   body?: never

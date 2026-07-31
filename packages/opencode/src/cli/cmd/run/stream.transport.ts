@@ -132,6 +132,10 @@ type TransportService = {
 
 class Service extends Context.Service<Service, TransportService>()("@opencode/RunStreamTransport") {}
 
+function isModelCallEvent(event: Event) {
+  return String(event.type).startsWith("model.call.")
+}
+
 function sid(event: Event): string | undefined {
   if (event.type === "message.updated") {
     return event.properties.sessionID
@@ -160,6 +164,31 @@ function sid(event: Event): string | undefined {
   }
 
   return undefined
+}
+
+async function listModelCalls(sdk: OpencodeClient, sessionID: string) {
+  const modelCall = (
+    sdk as unknown as {
+      modelCall?: {
+        list(input: { sessionID: string }): Promise<{ data?: unknown }>
+      }
+    }
+  ).modelCall
+  if (!modelCall) {
+    return []
+  }
+
+  const response = await modelCall.list({ sessionID })
+  if (Array.isArray(response.data)) {
+    return response.data
+  }
+
+  const data = response.data as { data?: unknown; items?: unknown[] } | undefined
+  if (Array.isArray(data?.data)) {
+    return data.data
+  }
+
+  return Array.isArray(data?.items) ? data.items : []
 }
 
 function isEvent(value: unknown): value is Event {
@@ -674,7 +703,7 @@ function createLayer(input: StreamInput) {
         })
 
         const bootstrap = Effect.fn("RunStreamTransport.bootstrap")(function* () {
-          const [messagesList, children, permissions, questions] = yield* Effect.all(
+          const [messagesList, children, modelCalls, permissions, questions] = yield* Effect.all(
             [
               messages(
                 input.sessionID,
@@ -692,6 +721,7 @@ function createLayer(input: StreamInput) {
                 Effect.map((item) => item.data ?? []),
                 Effect.orElseSucceed(() => []),
               ),
+              Effect.promise(() => listModelCalls(input.sdk, input.sessionID)).pipe(Effect.orElseSucceed(() => [])),
               Effect.promise(() => input.sdk.permission.list()).pipe(
                 Effect.map((item) => item.data ?? []),
                 Effect.orElseSucceed(() => []),
@@ -751,6 +781,7 @@ function createLayer(input: StreamInput) {
             data: state.subagent,
             messages: messagesList,
             children,
+            modelCalls,
             permissions,
             questions,
           })
@@ -956,7 +987,7 @@ function createLayer(input: StreamInput) {
             const next: Event[] = []
             let changed = false
             for (const event of pending) {
-              if (!tracked(sid(event))) {
+              if (!tracked(sid(event)) && !isModelCallEvent(event)) {
                 next.push(event)
                 continue
               }
@@ -1149,14 +1180,14 @@ function createLayer(input: StreamInput) {
 
                 const sessionID = sid(event)
                 if (booting || replaying) {
-                  if (sessionID) {
+                  if (sessionID || isModelCallEvent(event)) {
                     input.trace?.write("recv.event", event)
                     buffered.push(event)
                   }
                   return
                 }
 
-                if (!tracked(sessionID)) {
+                if (!tracked(sessionID) && !isModelCallEvent(event)) {
                   if (sessionID) {
                     input.trace?.write("recv.event", event)
                     buffered.push(event)

@@ -16,18 +16,55 @@ export function SubagentFooter() {
 
   const subagentInfo = createMemo(() => {
     const s = session()
-    if (!s) return { label: "Subagent", index: 0, total: 0 }
+    if (!s) return { label: "Child session", index: 0, total: 0 }
+    const metadata =
+      s.metadata && typeof s.metadata === "object" && !Array.isArray(s.metadata)
+        ? (s.metadata as Record<string, unknown>)
+        : undefined
+    const modelCall =
+      metadata?.modelCall && typeof metadata.modelCall === "object" && !Array.isArray(metadata.modelCall)
+        ? (metadata.modelCall as Record<string, unknown>)
+        : undefined
+    const origin = (
+      s as unknown as {
+        origin?: Record<string, unknown>
+      }
+    ).origin
+    const matched =
+      origin?.type === "model_call" &&
+      typeof origin.callID === "string" &&
+      modelCall?.callID === origin.callID &&
+      (!modelCall.parentSessionID || modelCall.parentSessionID === origin.parentSessionID) &&
+      (!modelCall.parentAssistantMessageID ||
+        modelCall.parentAssistantMessageID === origin.parentAssistantMessageID) &&
+      (!modelCall.parentToolCallID || modelCall.parentToolCallID === origin.parentToolCallID) &&
+      (!modelCall.requestedModel || sameModel(modelCall.requestedModel, origin.requestedModel))
+        ? modelCall
+        : undefined
+    const call = origin?.type === "model_call" ? { ...origin, ...matched } : undefined
     const agentMatch = s.title.match(/@(\w+) subagent/)
-    const label = agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
+    const label = call
+      ? `Model Call · ${format(call.actualModel ?? s.model ?? call.requestedModel)}`
+      : agentMatch
+        ? Locale.titlecase(agentMatch[1])
+        : "Child session"
+    const detail = call
+      ? [
+          call.mode === "background" || call.background === true ? "background" : "foreground",
+          typeof call.status === "string" ? call.status : undefined,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : undefined
 
-    if (!s.parentID) return { label, index: 0, total: 0 }
+    if (!s.parentID) return { label, detail, index: 0, total: 0 }
 
     const siblings = sync.data.session
       .filter((x) => x.parentID === s.parentID)
       .toSorted((a, b) => a.time.created - b.time.created)
     const index = siblings.findIndex((x) => x.id === s.id)
 
-    return { label, index: index + 1, total: siblings.length }
+    return { label, detail, index: index + 1, total: siblings.length }
   })
 
   const usage = createMemo(() => {
@@ -46,6 +83,8 @@ export function SubagentFooter() {
     const money = new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
+      minimumFractionDigits: cost > 0 && cost < 0.01 ? 4 : 2,
+      maximumFractionDigits: cost > 0 && cost < 0.01 ? 4 : 2,
     })
 
     return {
@@ -83,6 +122,11 @@ export function SubagentFooter() {
             <Show when={subagentInfo().total > 0}>
               <text style={{ fg: theme.textMuted }}>
                 ({subagentInfo().index} of {subagentInfo().total})
+              </text>
+            </Show>
+            <Show when={subagentInfo().detail}>
+              <text fg={theme.textMuted} wrapMode="none">
+                {subagentInfo().detail}
               </text>
             </Show>
             <Show when={usage()}>
@@ -128,5 +172,26 @@ export function SubagentFooter() {
         </box>
       </box>
     </box>
+  )
+}
+
+function format(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "Model"
+  const providerID = Reflect.get(value, "providerID")
+  const id = Reflect.get(value, "id") ?? Reflect.get(value, "modelID")
+  if (typeof providerID !== "string" || typeof id !== "string") return "Model"
+  const variant = Reflect.get(value, "variant")
+  return `${providerID}/${id}${typeof variant === "string" && variant !== "default" ? ` (${variant})` : ""}`
+}
+
+function sameModel(left: unknown, right: unknown) {
+  if (!left || typeof left !== "object" || !right || typeof right !== "object") return false
+  const leftVariant = Reflect.get(left, "variant")
+  const rightVariant = Reflect.get(right, "variant")
+  return (
+    Reflect.get(left, "providerID") === Reflect.get(right, "providerID") &&
+    Reflect.get(left, "id") === Reflect.get(right, "id") &&
+    (typeof leftVariant === "string" ? leftVariant : "default") ===
+      (typeof rightVariant === "string" ? rightVariant : "default")
   )
 }

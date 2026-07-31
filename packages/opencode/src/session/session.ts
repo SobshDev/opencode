@@ -44,9 +44,14 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { ModelCall } from "@opencode-ai/schema/model-call"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
+
+function normalizeModelVariant(variant: string | undefined) {
+  return variant === undefined || variant === "default" ? undefined : variant
+}
 
 export function isDefaultTitle(title: string) {
   return new RegExp(
@@ -106,6 +111,7 @@ export function fromRow(row: SessionRow): Info {
     },
     share,
     metadata: row.metadata ?? undefined,
+    ...(Schema.is(ModelCall.Origin)(row.origin) ? { origin: row.origin } : {}),
     revert,
     permission: row.permission ? [...row.permission] : undefined,
     time: {
@@ -136,6 +142,7 @@ export function toRow(info: Info) {
     summary_files: info.summary?.files,
     summary_diffs: info.summary?.diffs,
     metadata: info.metadata,
+    origin: info.origin,
     cost: info.cost ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
@@ -238,11 +245,14 @@ export const Info = Schema.Struct({
   model: optional(Model),
   version: Schema.String,
   metadata: optional(Metadata),
+  origin: optional(ModelCall.Origin),
   time: Time,
   permission: optional(PermissionV1.Ruleset),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
-export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
+export type Info = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Info>>, "origin"> & {
+  origin?: ModelCall.Origin
+}
 
 export const ProjectInfo = Schema.Struct({
   id: ProjectV2.ID,
@@ -255,7 +265,9 @@ export const GlobalInfo = Schema.Struct({
   ...Info.fields,
   project: Schema.NullOr(ProjectInfo),
 }).annotate({ identifier: "GlobalSession" })
-export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>
+export type GlobalInfo = Omit<Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>, "origin"> & {
+  origin?: ModelCall.Origin
+}
 
 export const CreateInput = Schema.optional(
   Schema.Struct({
@@ -410,17 +422,30 @@ export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionBusy
   sessionID: SessionID,
 }) {}
 
+export class ModelCallChildImmutableError extends Schema.TaggedErrorClass<ModelCallChildImmutableError>()(
+  "SessionModelCallChildImmutableError",
+  {
+    sessionID: SessionID,
+  },
+) {
+  override get message() {
+    return `Model-call child Session agent and model are immutable: ${this.sessionID}`
+  }
+}
+
 export type NotFound = NotFoundError
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
   readonly create: (input?: {
+    id?: SessionID
     parentID?: SessionID
     title?: string
     agent?: string
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
+    origin?: ModelCall.Origin
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
@@ -508,6 +533,7 @@ const layer: Layer.Layer<
       directory: string
       path?: string
       metadata?: typeof Metadata.Type
+      origin?: ModelCall.Origin
       permission?: PermissionV1.Ruleset
     }) {
       const ctx = yield* InstanceState.context
@@ -524,6 +550,7 @@ const layer: Layer.Layer<
         agent: input.agent,
         model: input.model,
         metadata: input.metadata,
+        origin: input.origin,
         permission: input.permission ? [...input.permission] : undefined,
         cost: 0,
         tokens: EmptyTokens,
@@ -667,17 +694,20 @@ const layer: Layer.Layer<
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
+      id?: SessionID
       parentID?: SessionID
       title?: string
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
+      origin?: ModelCall.Origin
       permission?: PermissionV1.Ruleset
       workspaceID?: WorkspaceV2.ID
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
       return yield* createNext({
+        id: input?.id,
         parentID: input?.parentID,
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
@@ -685,6 +715,7 @@ const layer: Layer.Layer<
         agent: input?.agent,
         model: input?.model,
         metadata: input?.metadata,
+        origin: input?.origin,
         permission: input?.permission,
         workspaceID: input?.workspaceID ?? workspace,
       })
@@ -770,6 +801,16 @@ const layer: Layer.Layer<
       model: NonNullable<Info["model"]>
       time: number
     }) {
+      const current = yield* get(input.sessionID).pipe(Effect.orDie)
+      const same =
+        current.agent === input.agent &&
+        current.model?.providerID === input.model.providerID &&
+        current.model.id === input.model.id &&
+        normalizeModelVariant(current.model.variant) === normalizeModelVariant(input.model.variant)
+      if (same) return
+      if (current.origin?.type === "model_call") {
+        return yield* Effect.die(new ModelCallChildImmutableError({ sessionID: input.sessionID }))
+      }
       yield* patch(input.sessionID, {
         agent: input.agent,
         model: input.model,

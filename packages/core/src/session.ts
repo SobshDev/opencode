@@ -37,6 +37,8 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { Permission } from "@opencode-ai/schema/permission"
+import { ModelCall } from "@opencode-ai/schema/model-call"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -78,6 +80,11 @@ export type ListInput = typeof ListInput.Type
 
 type CreateInput = {
   id?: SessionSchema.ID
+  parentID?: SessionSchema.ID
+  title?: string
+  metadata?: Record<string, unknown>
+  origin?: ModelCall.Origin
+  permission?: Permission.Ruleset
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
@@ -95,7 +102,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ses
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
   {
-    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait"]),
+    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "switchModel", "compact", "wait"]),
   },
 ) {}
 
@@ -112,6 +119,7 @@ export type Error = NotFoundError | MessageDecodeError | OperationUnavailableErr
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
+  readonly children: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info[], NotFoundError>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
@@ -139,15 +147,26 @@ export interface Interface {
     after?: number
     limit: number
   }) => Effect.Effect<{ events: ReadonlyArray<SessionEvent.DurableEvent>; hasMore: boolean }, NotFoundError>
-  readonly switchAgent: (input: { sessionID: SessionSchema.ID; agent: string }) => Effect.Effect<void, NotFoundError>
+  readonly switchAgent: (input: {
+    sessionID: SessionSchema.ID
+    agent: string
+  }) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly switchModel: (input: {
     sessionID: SessionSchema.ID
     model: ModelV2.Ref
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly prompt: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
     prompt: PromptInput.Prompt
+    delivery?: SessionInput.Delivery
+    resume?: boolean
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  /** Trusted admission path for typed runtime inputs that are not accepted by the public prompt API. */
+  readonly internal: (input: {
+    id: SessionMessage.ID
+    sessionID: SessionSchema.ID
+    prompt: Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
@@ -222,10 +241,14 @@ const layer = Layer.effect(
           slug: Slug.create(),
           version: InstallationVersion,
           projectID: project.id,
+          parentID: input.parentID,
           directory: input.location.directory,
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
-          title: `New session - ${new Date(now).toISOString()}`,
+          title: input.title ?? `New session - ${new Date(now).toISOString()}`,
+          metadata: input.metadata,
+          origin: input.origin,
+          permissionV2: input.permission,
           agent: input.agent,
           model: input.model
             ? {
@@ -300,6 +323,16 @@ const layer = Layer.effect(
           Effect.orDie,
         )
         return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+      }),
+      children: Effect.fn("V2Session.children")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return (yield* db
+          .select()
+          .from(SessionTable)
+          .where(eq(SessionTable.parent_id, sessionID))
+          .orderBy(asc(SessionTable.time_created), asc(SessionTable.id))
+          .all()
+          .pipe(Effect.orDie)).map((row) => fromRow(row))
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
         yield* result.get(input.sessionID)
@@ -384,6 +417,36 @@ const layer = Layer.effect(
           }),
         ),
       ),
+      internal: Effect.fn("V2Session.internal")((input) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            yield* result.get(input.sessionID)
+            const delivery = input.delivery ?? "steer"
+            const expected = {
+              sessionID: input.sessionID,
+              messageID: input.id,
+              prompt: input.prompt,
+              delivery,
+            }
+            const admitted = yield* SessionInput.admit(db, events, {
+              id: input.id,
+              sessionID: input.sessionID,
+              prompt: input.prompt,
+              delivery,
+            }).pipe(
+              Effect.catchDefect((defect) =>
+                defect instanceof SessionInput.LifecycleConflict
+                  ? new PromptConflictError({ sessionID: input.sessionID, messageID: input.id })
+                  : Effect.die(defect),
+              ),
+            )
+            if (!SessionInput.equivalent(admitted, expected))
+              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID: input.id })
+            if (input.resume !== false) yield* execution.wake(admitted.sessionID)
+            return admitted
+          }),
+        ),
+      ),
       shell: Effect.fn("V2Session.shell")(function* () {
         return yield* new OperationUnavailableError({ operation: "shell" })
       }),
@@ -391,7 +454,9 @@ const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "skill" })
       }),
       switchAgent: Effect.fn("V2Session.switchAgent")(function* (input) {
-        yield* result.get(input.sessionID)
+        const session = yield* result.get(input.sessionID)
+        if (session.origin?.type === "model_call")
+          return yield* new OperationUnavailableError({ operation: "switchAgent" })
         yield* events.publish(SessionEvent.AgentSwitched, {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
@@ -401,6 +466,8 @@ const layer = Layer.effect(
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
         const session = yield* result.get(input.sessionID)
+        if (session.origin?.type === "model_call")
+          return yield* new OperationUnavailableError({ operation: "switchModel" })
         if (
           session.model?.providerID === input.model.providerID &&
           session.model.id === input.model.id &&

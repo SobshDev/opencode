@@ -8,6 +8,7 @@ import * as OpenAIResponses from "@opencode-ai/llm/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@opencode-ai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
+import { AgentV2 } from "../../agent"
 import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
@@ -72,13 +73,39 @@ export type Error =
   | Integration.AuthorizationError
 
 export interface Interface {
-  readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Model, Error>
+  readonly resolve: (session: SessionSchema.Info, agent?: AgentV2.Info) => Effect.Effect<Model, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionRunnerModel") {}
 
+const toolSupport = new WeakMap<Model, boolean>()
+const canonicalReferences = new WeakMap<Model, ModelV2.Ref>()
+
 /** Test or embedding seam for supplying a model resolver directly. */
-export const layerWith = (resolve: Interface["resolve"]) => Layer.succeed(Service, Service.of({ resolve }))
+export const layerWith = (resolve: Interface["resolve"], supportsTools: (model: Model) => boolean = () => true) =>
+  Layer.succeed(
+    Service,
+    Service.of({
+      resolve: (session, agent) =>
+        resolve(session, agent).pipe(
+          Effect.tap((model) =>
+            Effect.sync(() => {
+              toolSupport.set(model, supportsTools(model))
+            }),
+          ),
+        ),
+    }),
+  )
+
+export const supportsTools = (model: Model) => toolSupport.get(model) ?? true
+
+export const reference = (model: Model, selected?: ModelV2.Ref) =>
+  selected ??
+  canonicalReferences.get(model) ??
+  ModelV2.Ref.make({
+    providerID: ProviderV2.ID.make(model.provider),
+    id: ModelV2.ID.make(model.id),
+  })
 
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (credential?.type === "key") return Auth.value(credential.key)
@@ -170,7 +197,33 @@ export const fromCatalogModel = (
 }
 
 export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
-  withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
+  withVariant(model, session.model?.variant).pipe(
+    Effect.flatMap((selected) =>
+      fromCatalogModel(selected, credential).pipe(
+        Effect.tap((resolved) =>
+          Effect.sync(() => {
+            toolSupport.set(resolved, selected.capabilities.tools)
+            canonicalReferences.set(
+              resolved,
+              ModelV2.Ref.make({
+                providerID: selected.providerID,
+                id: selected.id,
+                ...(session.model?.variant === undefined ? {} : { variant: session.model.variant }),
+              }),
+            )
+          }),
+        ),
+      ),
+    ),
+  )
+
+const withAgentRequest = (model: ModelV2.Info, agent?: AgentV2.Info) =>
+  agent
+    ? produce(model, (draft) => {
+        Object.assign(draft.request.headers, agent.request.headers)
+        Object.assign(draft.request.body, agent.request.body)
+      })
+    : model
 
 export const supported = (model: ModelV2.Info) =>
   model.api.type === "aisdk" &&
@@ -185,20 +238,21 @@ export const locationLayer = Layer.effect(
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
     return Service.of({
-      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
+      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session, agent) {
         // Location plugins populate and filter the catalog asynchronously during layer startup.
-        const defaultModel = session.model ? undefined : yield* catalog.model.default()
-        const selected = session.model
+        const selectedRef = session.model ?? agent?.model
+        const defaultModel = selectedRef ? undefined : yield* catalog.model.default()
+        const selected = selectedRef
           ? (yield* catalog.model.available()).find(
-              (model) => model.providerID === session.model?.providerID && model.id === session.model.id,
+              (model) => model.providerID === selectedRef.providerID && model.id === selectedRef.id,
             )
           : defaultModel && supported(defaultModel)
             ? defaultModel
             : (yield* catalog.model.available()).find(supported)
-        if (!selected && session.model)
+        if (!selected && selectedRef)
           return yield* new ModelUnavailableError({
-            providerID: session.model.providerID,
-            modelID: session.model.id,
+            providerID: selectedRef.providerID,
+            modelID: selectedRef.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
         const provider = yield* catalog.provider.get(selected.providerID)
@@ -206,8 +260,8 @@ export const locationLayer = Layer.effect(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
         )
         return yield* resolve(
-          session,
-          selected,
+          selectedRef ? { ...session, model: selectedRef } : session,
+          withAgentRequest(selected, agent),
           connection ? yield* integrations.connection.resolve(connection) : undefined,
         )
       }),

@@ -6,6 +6,8 @@ import { FileDiff } from "../file-diff"
 import { Project } from "../project"
 import { Provider } from "../provider"
 import { Model } from "../model"
+import { ModelCall } from "../model-call"
+import { Permission } from "../permission"
 import { NonNegativeInt, optional, statics } from "../schema"
 import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
@@ -84,6 +86,12 @@ const partBase = {
   messageID: MessageID,
 }
 
+const ModelCallResultInternal = Schema.Struct({
+  type: Schema.Literal("model-call-result"),
+  result: ModelCall.CallResult,
+})
+type ModelCallResultInternal = Schema.Schema.Type<typeof ModelCallResultInternal>
+
 export const SnapshotPart = Schema.Struct({
   ...partBase,
   type: Schema.Literal("snapshot"),
@@ -112,8 +120,11 @@ export const TextPart = Schema.Struct({
     }),
   ),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
+  internal: Schema.optional(ModelCallResultInternal),
 }).annotate({ identifier: "TextPart" })
-export type TextPart = Types.DeepMutable<Schema.Schema.Type<typeof TextPart>>
+export type TextPart = Omit<Types.DeepMutable<Schema.Schema.Type<typeof TextPart>>, "internal"> & {
+  internal?: ModelCallResultInternal
+}
 
 export const ReasoningPart = Schema.Struct({
   ...partBase,
@@ -557,6 +568,8 @@ export const SessionInfo = Schema.Struct({
   model: optional(SessionModel),
   version: Schema.String,
   metadata: optional(Schema.Record(Schema.String, Schema.Any)),
+  origin: optional(ModelCall.Origin),
+  permissionV2: optional(Permission.Ruleset),
   time: Schema.Struct({
     created: NonNegativeInt,
     updated: NonNegativeInt,
