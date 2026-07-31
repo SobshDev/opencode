@@ -615,8 +615,8 @@ describe("ModelCallTool V2 orchestration", () => {
       expect(permissionAssertions).toEqual([
         {
           action: "model_call",
-          resources: ["*"],
-          save: ["*"],
+          resources: [`${providerID}/${modelID}`],
+          save: [`${providerID}/${modelID}`],
           sessionID: parentID,
           agent: agentID,
           source: {

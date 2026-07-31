@@ -137,6 +137,10 @@ function isModelCallEvent(event: Event) {
 }
 
 function sid(event: Event): string | undefined {
+  if (event.type === "session.created" || event.type === "session.updated") {
+    return event.properties.info.id
+  }
+
   if (event.type === "message.updated") {
     return event.properties.sessionID
   }

@@ -5,6 +5,9 @@ import Ajv from "ajv"
 import { Option, Schema } from "effect"
 
 export const MAX_STRUCTURED_BYTES = 1024 * 1024
+export const MAX_SCHEMA_BYTES = 64 * 1024
+export const MAX_SCHEMA_DEPTH = 20
+export const MAX_SCHEMA_NODES = 1_000
 
 export type ModelIdentity = {
   readonly providerID: string
@@ -66,6 +69,29 @@ export function validateOutputSchema(schema: Record<string, unknown>): OutputSch
       valid: false,
       error: 'output_schema must have an object root (`type: "object"`)',
     }
+  const encoded = JSON.stringify(schema)
+  if (new TextEncoder().encode(encoded).byteLength > MAX_SCHEMA_BYTES)
+    return { valid: false, error: "output_schema exceeds the 64 KiB limit" }
+  const nodes = [{ value: schema as unknown, depth: 0 }]
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]
+    if (!node) continue
+    if (node.depth > MAX_SCHEMA_DEPTH) return { valid: false, error: "output_schema exceeds the maximum depth of 20" }
+    if (nodes.length > MAX_SCHEMA_NODES)
+      return { valid: false, error: "output_schema exceeds the maximum size of 1000 nodes" }
+    if (typeof node.value !== "object" || node.value === null) continue
+    if (
+      !Array.isArray(node.value) &&
+      (Object.hasOwn(node.value, "pattern") || Object.hasOwn(node.value, "patternProperties"))
+    )
+      return { valid: false, error: "output_schema regular expression constraints are not supported" }
+    nodes.push(
+      ...Object.values(node.value).map((value) => ({
+        value,
+        depth: node.depth + 1,
+      })),
+    )
+  }
   try {
     new Ajv({ strict: false }).compile(schema)
     return { valid: true }

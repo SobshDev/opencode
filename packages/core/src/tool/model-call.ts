@@ -534,7 +534,10 @@ const layer = Layer.effectDiscard(
 
     yield* Effect.forEach(
       yield* calls.recoverable("v2"),
-      (record) => recover(record).pipe(Effect.forkIn(scope, { startImmediately: true })),
+      (record) =>
+        (record.background ? recover(record) : calls.detach(record.id).pipe(Effect.flatMap(recover))).pipe(
+          Effect.forkIn(scope, { startImmediately: true }),
+        ),
       { discard: true },
     )
   }),

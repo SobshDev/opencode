@@ -670,8 +670,8 @@ describe("tool.model_call", () => {
       expect(asks).toEqual([
         {
           permission: "model_call",
-          patterns: ["*"],
-          always: ["*"],
+          patterns: ["review/critic"],
+          always: ["review/critic"],
           metadata: {
             model: output.requestedModel,
             background: false,

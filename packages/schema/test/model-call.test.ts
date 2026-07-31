@@ -148,6 +148,7 @@ describe("ModelCall", () => {
       "origin",
       "requestedModel",
       "prompt",
+      "system",
       "background",
       "output_schema",
       "childSessionID",
@@ -174,6 +175,6 @@ describe("ModelCall", () => {
       "foregroundOnly",
       "usage",
     ])
-    expect(Object.keys(ModelCall.Event.Interrupted.data.fields)).toEqual(["timestamp", "callID", "usage"])
+    expect(Object.keys(ModelCall.Event.Interrupted.data.fields)).toEqual(["timestamp", "callID", "error", "usage"])
   })
 })

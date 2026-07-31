@@ -411,15 +411,13 @@ export const ModelCallTool = Tool.define(
         sessionID: prepared.parentSessionID,
         messageID: MessageID.ascending(prepared.record.completionMessageID),
       }
-      const wakeUntilConsumed: () => Effect.Effect<void> = Effect.fn("ModelCallTool.wakeUntilConsumed")(
-        function* () {
-          if (yield* ops.consumed(completion)) return
-          yield* ops.wake(prepared.parentSessionID)
-          if (yield* ops.consumed(completion)) return
-          yield* Effect.sleep("25 millis")
-          return yield* wakeUntilConsumed()
-        },
-      )
+      const wakeUntilConsumed: () => Effect.Effect<void> = Effect.fn("ModelCallTool.wakeUntilConsumed")(function* () {
+        if (yield* ops.consumed(completion)) return
+        yield* ops.wake(prepared.parentSessionID)
+        if (yield* ops.consumed(completion)) return
+        yield* Effect.sleep("25 millis")
+        return yield* wakeUntilConsumed()
+      })
       yield* wakeUntilConsumed().pipe(
         Effect.andThen(calls.delivered(prepared.callID)),
         Effect.tap(() =>

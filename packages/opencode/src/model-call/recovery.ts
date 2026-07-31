@@ -377,9 +377,9 @@ const layer = Layer.effect(
         status: record.status,
         prompt: {
           exists: message !== undefined,
-          // Legacy persists the assistant row immediately before provider work. Its
-          // presence makes the outcome unknown after a crash, so never retry it.
-          promoted: assistant !== undefined,
+          // A durable running status means provider work began even if the process
+          // crashed before the first assistant row was persisted.
+          promoted: record.status === "running",
         },
         assistant: {
           exists: assistant !== undefined,

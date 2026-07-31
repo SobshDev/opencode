@@ -206,8 +206,16 @@ export function Session() {
   onCleanup(() => setEpilogue())
   const children = createMemo(() => {
     const parentID = session()?.parentID ?? session()?.id
+    const sessionIDs = new Set(parentID ? [parentID] : [])
+    let size = -1
+    while (size !== sessionIDs.size) {
+      size = sessionIDs.size
+      sync.data.session
+        .filter((item) => item.parentID && sessionIDs.has(item.parentID))
+        .forEach((item) => sessionIDs.add(item.id))
+    }
     return sync.data.session
-      .filter((x) => x.parentID === parentID || x.id === parentID)
+      .filter((item) => sessionIDs.has(item.id))
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])

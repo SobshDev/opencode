@@ -116,30 +116,25 @@ function applyUsage(
     .pipe(Effect.orDie)
 }
 
-function recalculateUsage(
-  db: DatabaseService,
-  sessionID: (typeof SessionEvent.Step.Ended.Type)["data"]["sessionID"],
-) {
+function recalculateUsage(db: DatabaseService, sessionID: (typeof SessionEvent.Step.Ended.Type)["data"]["sessionID"]) {
   return Effect.gen(function* () {
-    const legacy = (
-      yield* db.select().from(PartTable).where(eq(PartTable.session_id, sessionID)).all().pipe(Effect.orDie)
-    )
+    const legacy = (yield* db
+      .select()
+      .from(PartTable)
+      .where(eq(PartTable.session_id, sessionID))
+      .all()
+      .pipe(Effect.orDie))
       .map((row) => usage(row.data))
       .filter((item): item is Usage => item !== undefined)
-    const current = (
-      yield* db
-        .select()
-        .from(SessionMessageTable)
-        .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "assistant")))
-        .all()
-        .pipe(Effect.orDie)
-    )
+    const current = (yield* db
+      .select()
+      .from(SessionMessageTable)
+      .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "assistant")))
+      .all()
+      .pipe(Effect.orDie))
       .map((row) => decodeMessage({ ...row.data, id: row.id, type: row.type }))
       .filter(
-        (
-          message,
-        ): message is SessionMessage.Assistant &
-          Required<Pick<SessionMessage.Assistant, "cost" | "tokens">> =>
+        (message): message is SessionMessage.Assistant & Required<Pick<SessionMessage.Assistant, "cost" | "tokens">> =>
           message.type === "assistant" && message.cost !== undefined && message.tokens !== undefined,
       )
       .map((message) => ({ cost: message.cost, tokens: message.tokens }))
