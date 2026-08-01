@@ -54,6 +54,11 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelCallV2 } from "@opencode-ai/core/model-call"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
+import { Tool as CoreTool } from "@opencode-ai/core/tool/tool"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
@@ -95,6 +100,7 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const mcp = yield* MCP.Service
+    const applicationTools = yield* ApplicationTools.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -259,7 +265,43 @@ const layer = Layer.effect(
 
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
-      return [...s.builtin, ...s.custom] as Tool.Def[]
+      const existing = new Set([...s.builtin, ...s.custom].map((tool) => tool.id))
+      const application = Array.from(applicationTools.entries(), ([id, entry]): Tool.Def => {
+        const definition = CoreTool.definition(id, entry.tool)
+        return {
+          id,
+          description: definition.description,
+          parameters: Schema.Unknown,
+          jsonSchema: definition.inputSchema,
+          execute: (input, context) => {
+            if (!context.callID) return Effect.die(new Error(`${id} requires a provider tool-call ID`))
+            return CoreTool.settle(
+              entry.tool,
+              { type: "tool-call", id: context.callID, name: id, input },
+              {
+                sessionID: SessionV2.ID.make(context.sessionID),
+                agent: AgentV2.ID.make(context.agent),
+                location: context.location,
+                abort: context.abort,
+                assistantMessageID: SessionMessage.ID.make(context.messageID),
+                toolCallID: context.callID,
+              },
+            ).pipe(
+              Effect.orDie,
+              Effect.map((output) => ({
+                title: "",
+                metadata: {},
+                output:
+                  output.content
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join("\n") || JSON.stringify(output.structured),
+              })),
+            )
+          },
+        }
+      }).filter((tool) => !existing.has(tool.id))
+      return [...s.builtin, ...s.custom, ...application]
     })
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
@@ -321,7 +363,9 @@ const layer = Layer.effect(
           }
           yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
           const jsonSchema =
-            output.parameters === tool.parameters || output.jsonSchema !== tool.jsonSchema
+            applicationTools.entries().has(tool.id) ||
+            output.parameters === tool.parameters ||
+            output.jsonSchema !== tool.jsonSchema
               ? output.jsonSchema
               : undefined
           return {
@@ -453,6 +497,7 @@ export const node = LayerNode.make({
     MCP.node,
     Database.node,
     ModelCallV2.node,
+    ApplicationTools.node,
     Ripgrep.node,
   ],
 })

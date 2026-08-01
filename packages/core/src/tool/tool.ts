@@ -164,6 +164,41 @@ function runtimeOf(tool: AnyTool) {
 
 function toJsonSchema(schema: Schema.Top): JsonSchema.JsonSchema {
   const document = Schema.toJsonSchemaDocument(schema)
-  if (Object.keys(document.definitions).length === 0) return document.schema
-  return { ...document.schema, $defs: document.definitions }
+  const root = resolveRootReference(document.schema, document.definitions)
+  const result = objectRoot(root)
+  if (Object.keys(document.definitions).length === 0) return result
+  return { ...result, $defs: document.definitions }
+}
+
+function resolveRootReference(
+  schema: JsonSchema.JsonSchema,
+  definitions: Readonly<Record<string, JsonSchema.JsonSchema>>,
+) {
+  if (!("$ref" in schema) || typeof schema.$ref !== "string") return schema
+  const name = schema.$ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/)?.[1]
+  const target = name ? definitions[name] : undefined
+  if (!target || typeof target !== "object") return schema
+  const { $ref: _, ...rest } = schema
+  return { ...target, ...rest }
+}
+
+function objectRoot(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
+  if ("type" in schema && schema.type === "object") return schema
+  if (!("anyOf" in schema) || !Array.isArray(schema.anyOf)) return schema
+  const objects = schema.anyOf.filter(
+    (item): item is JsonSchema.JsonSchema & { type: "object" } =>
+      typeof item === "object" && item !== null && "type" in item && item.type === "object",
+  )
+  if (objects.length === 0) return schema
+  if (objects.length !== schema.anyOf.length)
+    return objects.length === 1 && schema.anyOf.length === 2 ? objects[0] : schema
+
+  const required = objects
+    .map((item) => new Set(Array.isArray(item.required) ? item.required : []))
+    .reduce((common, item) => common.intersection(item))
+  return {
+    type: "object",
+    properties: Object.assign({}, ...objects.map((item) => item.properties ?? {})),
+    ...(required.size > 0 ? { required: Array.from(required) } : {}),
+  }
 }
