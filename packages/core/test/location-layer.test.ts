@@ -16,6 +16,7 @@ import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
@@ -31,9 +32,13 @@ import { Project } from "../src/project"
 import { Reference } from "../src/reference"
 import { ToolRegistry } from "../src/tool/registry"
 import { ApplicationTools } from "../src/tool/application-tools"
+import { TeamTool } from "../src/tool/team"
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, Database.node, EventV2.node, LocationServiceMap.node])),
+  AppNodeBuilder.build(
+    LayerNode.group([ApplicationTools.node, Database.node, EventV2.node, LocationServiceMap.node, TeamTool.node]),
+    [[SessionExecution.node, SessionExecution.noopLayer]],
+  ),
 )
 
 describe("LocationServiceMap", () => {
@@ -103,6 +108,20 @@ describe("LocationServiceMap", () => {
 
           const blockedState = yield* update(blocked.path)
           expect(blockedState.providers.some((provider) => provider.id === ProviderV2.ID.make("test"))).toBe(false)
+          expect(
+            blockedState.tools
+              .filter((tool) => tool.name.startsWith("team_"))
+              .map((tool) => [tool.name, tool.inputSchema.type])
+              .toSorted(([a], [b]) => String(a).localeCompare(String(b))),
+          ).toEqual([
+            ["team_send", "object"],
+            ["team_spawn", "object"],
+            ["team_status", "object"],
+            ["team_stop", "object"],
+            ["team_submit", "object"],
+            ["team_sync", "object"],
+            ["team_task", "object"],
+          ])
           expect(blockedState.tools.map((tool) => tool.name).sort()).toEqual([
             "application_context",
             "apply_patch",
@@ -114,6 +133,13 @@ describe("LocationServiceMap", () => {
             "question",
             "read",
             "skill",
+            "team_send",
+            "team_spawn",
+            "team_status",
+            "team_stop",
+            "team_submit",
+            "team_sync",
+            "team_task",
             "todowrite",
             "webfetch",
             "websearch",
@@ -132,6 +158,13 @@ describe("LocationServiceMap", () => {
             "question",
             "read",
             "skill",
+            "team_send",
+            "team_spawn",
+            "team_status",
+            "team_stop",
+            "team_submit",
+            "team_sync",
+            "team_task",
             "todowrite",
             "webfetch",
             "websearch",

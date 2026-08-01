@@ -6,6 +6,7 @@ import { FileDiff } from "../file-diff"
 import { Project } from "../project"
 import { Provider } from "../provider"
 import { Model } from "../model"
+import { SessionOrigin } from "../session-origin"
 import { ModelCall } from "../model-call"
 import { Permission } from "../permission"
 import { NonNegativeInt, optional, statics } from "../schema"
@@ -568,7 +569,7 @@ export const SessionInfo = Schema.Struct({
   model: optional(SessionModel),
   version: Schema.String,
   metadata: optional(Schema.Record(Schema.String, Schema.Any)),
-  origin: optional(ModelCall.Origin),
+  origin: optional(SessionOrigin.Origin),
   permissionV2: optional(Permission.Ruleset),
   time: Schema.Struct({
     created: NonNegativeInt,

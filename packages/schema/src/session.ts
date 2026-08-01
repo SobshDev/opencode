@@ -4,13 +4,13 @@ import { Schema } from "effect"
 import { Agent } from "./agent"
 import { Location } from "./location"
 import { Model } from "./model"
-import { ModelCall } from "./model-call"
 import { Permission } from "./permission"
 import { Project } from "./project"
 import { DateTimeUtcFromMillis, optional, RelativePath } from "./schema"
 import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
+import { SessionOrigin } from "./session-origin"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -43,7 +43,7 @@ export const Info = Schema.Struct({
   location: Location.Ref,
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
-  origin: ModelCall.Origin.pipe(optional),
+  origin: SessionOrigin.Origin.pipe(optional),
   permission: Permission.Ruleset.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })
 

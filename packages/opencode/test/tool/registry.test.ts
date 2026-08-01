@@ -21,6 +21,8 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { MCP } from "@/mcp"
 import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
+import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
+import { Tool as CoreTool } from "@opencode-ai/core/tool/tool"
 
 const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
@@ -50,7 +52,7 @@ const brokenPluginLayer = Layer.succeed(
   }),
 )
 
-const root = LayerNode.group([ToolRegistry.node, Agent.node])
+const root = LayerNode.group([ToolRegistry.node, Agent.node, ApplicationTools.node])
 const replacements = [
   [Config.node, configLayer],
   [RuntimeFlags.node, RuntimeFlags.layer()],
@@ -100,6 +102,38 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  it.instance("includes dynamically registered Core application tools", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const applications = yield* ApplicationTools.Service
+      yield* applications
+        .register({
+          core_probe: CoreTool.make({
+            description: "Core probe",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ value: Schema.String }),
+            execute: () => Effect.succeed({ value: "ok" }),
+          }),
+        })
+        .pipe(Effect.orDie)
+
+      expect(yield* registry.ids()).toContain("core_probe")
+      expect((yield* registry.all()).find((tool) => tool.id === "core_probe")?.jsonSchema).toMatchObject({
+        type: "object",
+      })
+      const agents = yield* Agent.Service
+      expect(
+        (
+          yield* registry.tools({
+            providerID: ProviderV2.ID.opencode,
+            modelID: ModelV2.ID.make("test"),
+            agent: yield* agents.defaultInfo(),
+          })
+        ).find((tool) => tool.id === "core_probe")?.jsonSchema,
+      ).toMatchObject({ type: "object" })
+    }),
+  )
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

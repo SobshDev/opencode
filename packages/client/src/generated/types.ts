@@ -270,15 +270,24 @@ export type SessionsListOutput = {
         readonly patch: string
       }>
     }
-    readonly origin?: {
-      readonly type: "model_call"
-      readonly callID: string
-      readonly parentSessionID: string
-      readonly parentAssistantMessageID: string
-      readonly parentToolCallID: string
-      readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-      readonly outputSchema?: { readonly [x: string]: JsonValue }
-    }
+    readonly origin?:
+      | {
+          readonly type: "model_call"
+          readonly callID: string
+          readonly parentSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+          readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly outputSchema?: { readonly [x: string]: JsonValue }
+        }
+      | {
+          readonly type: "team_member"
+          readonly teamID: string
+          readonly memberID: string
+          readonly leadSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+        }
     readonly permission?: ReadonlyArray<{
       readonly action: string
       readonly resource: string
@@ -346,15 +355,24 @@ export type SessionsCreateOutput = {
         readonly patch: string
       }>
     }
-    readonly origin?: {
-      readonly type: "model_call"
-      readonly callID: string
-      readonly parentSessionID: string
-      readonly parentAssistantMessageID: string
-      readonly parentToolCallID: string
-      readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-      readonly outputSchema?: { readonly [x: string]: JsonValue }
-    }
+    readonly origin?:
+      | {
+          readonly type: "model_call"
+          readonly callID: string
+          readonly parentSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+          readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly outputSchema?: { readonly [x: string]: JsonValue }
+        }
+      | {
+          readonly type: "team_member"
+          readonly teamID: string
+          readonly memberID: string
+          readonly leadSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+        }
     readonly permission?: ReadonlyArray<{
       readonly action: string
       readonly resource: string
@@ -398,15 +416,24 @@ export type SessionsGetOutput = {
         readonly patch: string
       }>
     }
-    readonly origin?: {
-      readonly type: "model_call"
-      readonly callID: string
-      readonly parentSessionID: string
-      readonly parentAssistantMessageID: string
-      readonly parentToolCallID: string
-      readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-      readonly outputSchema?: { readonly [x: string]: JsonValue }
-    }
+    readonly origin?:
+      | {
+          readonly type: "model_call"
+          readonly callID: string
+          readonly parentSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+          readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly outputSchema?: { readonly [x: string]: JsonValue }
+        }
+      | {
+          readonly type: "team_member"
+          readonly teamID: string
+          readonly memberID: string
+          readonly leadSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+        }
     readonly permission?: ReadonlyArray<{
       readonly action: string
       readonly resource: string
@@ -448,15 +475,24 @@ export type SessionsChildrenOutput = {
         readonly patch: string
       }>
     }
-    readonly origin?: {
-      readonly type: "model_call"
-      readonly callID: string
-      readonly parentSessionID: string
-      readonly parentAssistantMessageID: string
-      readonly parentToolCallID: string
-      readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-      readonly outputSchema?: { readonly [x: string]: JsonValue }
-    }
+    readonly origin?:
+      | {
+          readonly type: "model_call"
+          readonly callID: string
+          readonly parentSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+          readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly outputSchema?: { readonly [x: string]: JsonValue }
+        }
+      | {
+          readonly type: "team_member"
+          readonly teamID: string
+          readonly memberID: string
+          readonly leadSessionID: string
+          readonly parentAssistantMessageID: string
+          readonly parentToolCallID: string
+        }
     readonly permission?: ReadonlyArray<{
       readonly action: string
       readonly resource: string
@@ -575,30 +611,39 @@ export type SessionsPromptOutput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
-      readonly internal?: {
-        readonly type: "model-call-result"
-        readonly result: {
-          readonly callID: string
-          readonly parentSessionID: string
-          readonly childSessionID: string
-          readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-          readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-          readonly mode: "foreground" | "background"
-          readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-          readonly text?: string
-          readonly structured?: JsonValue
-          readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-          readonly usage?: {
-            readonly cost: number
-            readonly tokens: {
-              readonly input: number
-              readonly output: number
-              readonly reasoning: number
-              readonly cache: { readonly read: number; readonly write: number }
+      readonly internal?:
+        | {
+            readonly type: "model-call-result"
+            readonly result: {
+              readonly callID: string
+              readonly parentSessionID: string
+              readonly childSessionID: string
+              readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+              readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+              readonly mode: "foreground" | "background"
+              readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
+              readonly text?: string
+              readonly structured?: JsonValue
+              readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
+              readonly usage?: {
+                readonly cost: number
+                readonly tokens: {
+                  readonly input: number
+                  readonly output: number
+                  readonly reasoning: number
+                  readonly cache: { readonly read: number; readonly write: number }
+                }
+              }
             }
           }
-        }
-      }
+        | {
+            readonly type: "team-message"
+            readonly messageID: string
+            readonly teamID: string
+            readonly senderMemberID: string
+            readonly senderSessionID: string
+            readonly body: string
+          }
     }
     readonly delivery: "steer" | "queue"
     readonly timeCreated: number
@@ -678,30 +723,46 @@ export type SessionsContextOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
-        readonly internal?: {
-          readonly type: "model-call-result"
-          readonly result: {
-            readonly callID: string
-            readonly parentSessionID: string
-            readonly childSessionID: string
-            readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly mode: "foreground" | "background"
-            readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-            readonly text?: string
-            readonly structured?: JsonValue
-            readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-            readonly usage?: {
-              readonly cost: number
-              readonly tokens: {
-                readonly input: number
-                readonly output: number
-                readonly reasoning: number
-                readonly cache: { readonly read: number; readonly write: number }
+        readonly internal?:
+          | {
+              readonly type: "model-call-result"
+              readonly result: {
+                readonly callID: string
+                readonly parentSessionID: string
+                readonly childSessionID: string
+                readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly mode: "foreground" | "background"
+                readonly status:
+                  | "preparing"
+                  | "queued"
+                  | "running"
+                  | "completed"
+                  | "failed"
+                  | "cancelled"
+                  | "interrupted"
+                readonly text?: string
+                readonly structured?: JsonValue
+                readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
+                readonly usage?: {
+                  readonly cost: number
+                  readonly tokens: {
+                    readonly input: number
+                    readonly output: number
+                    readonly reasoning: number
+                    readonly cache: { readonly read: number; readonly write: number }
+                  }
+                }
               }
             }
-          }
-        }
+          | {
+              readonly type: "team-message"
+              readonly messageID: string
+              readonly teamID: string
+              readonly senderMemberID: string
+              readonly senderSessionID: string
+              readonly body: string
+            }
         readonly type: "user"
       }
     | {
@@ -894,37 +955,58 @@ export type SessionsHistoryOutput = {
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
-            readonly internal?: {
-              readonly type: "model-call-result"
-              readonly result: {
-                readonly callID: string
-                readonly parentSessionID: string
-                readonly childSessionID: string
-                readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-                readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-                readonly mode: "foreground" | "background"
-                readonly status:
-                  | "preparing"
-                  | "queued"
-                  | "running"
-                  | "completed"
-                  | "failed"
-                  | "cancelled"
-                  | "interrupted"
-                readonly text?: string
-                readonly structured?: JsonValue
-                readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-                readonly usage?: {
-                  readonly cost: number
-                  readonly tokens: {
-                    readonly input: number
-                    readonly output: number
-                    readonly reasoning: number
-                    readonly cache: { readonly read: number; readonly write: number }
+            readonly internal?:
+              | {
+                  readonly type: "model-call-result"
+                  readonly result: {
+                    readonly callID: string
+                    readonly parentSessionID: string
+                    readonly childSessionID: string
+                    readonly requestedModel: {
+                      readonly id: string
+                      readonly providerID: string
+                      readonly variant?: string
+                    }
+                    readonly actualModel: {
+                      readonly id: string
+                      readonly providerID: string
+                      readonly variant?: string
+                    }
+                    readonly mode: "foreground" | "background"
+                    readonly status:
+                      | "preparing"
+                      | "queued"
+                      | "running"
+                      | "completed"
+                      | "failed"
+                      | "cancelled"
+                      | "interrupted"
+                    readonly text?: string
+                    readonly structured?: JsonValue
+                    readonly error?: {
+                      readonly code: string
+                      readonly message: string
+                      readonly outcomeUnknown?: boolean
+                    }
+                    readonly usage?: {
+                      readonly cost: number
+                      readonly tokens: {
+                        readonly input: number
+                        readonly output: number
+                        readonly reasoning: number
+                        readonly cache: { readonly read: number; readonly write: number }
+                      }
+                    }
                   }
                 }
-              }
-            }
+              | {
+                  readonly type: "team-message"
+                  readonly messageID: string
+                  readonly teamID: string
+                  readonly senderMemberID: string
+                  readonly senderSessionID: string
+                  readonly body: string
+                }
           }
           readonly delivery: "steer" | "queue"
         }
@@ -952,37 +1034,58 @@ export type SessionsHistoryOutput = {
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
-            readonly internal?: {
-              readonly type: "model-call-result"
-              readonly result: {
-                readonly callID: string
-                readonly parentSessionID: string
-                readonly childSessionID: string
-                readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-                readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-                readonly mode: "foreground" | "background"
-                readonly status:
-                  | "preparing"
-                  | "queued"
-                  | "running"
-                  | "completed"
-                  | "failed"
-                  | "cancelled"
-                  | "interrupted"
-                readonly text?: string
-                readonly structured?: JsonValue
-                readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-                readonly usage?: {
-                  readonly cost: number
-                  readonly tokens: {
-                    readonly input: number
-                    readonly output: number
-                    readonly reasoning: number
-                    readonly cache: { readonly read: number; readonly write: number }
+            readonly internal?:
+              | {
+                  readonly type: "model-call-result"
+                  readonly result: {
+                    readonly callID: string
+                    readonly parentSessionID: string
+                    readonly childSessionID: string
+                    readonly requestedModel: {
+                      readonly id: string
+                      readonly providerID: string
+                      readonly variant?: string
+                    }
+                    readonly actualModel: {
+                      readonly id: string
+                      readonly providerID: string
+                      readonly variant?: string
+                    }
+                    readonly mode: "foreground" | "background"
+                    readonly status:
+                      | "preparing"
+                      | "queued"
+                      | "running"
+                      | "completed"
+                      | "failed"
+                      | "cancelled"
+                      | "interrupted"
+                    readonly text?: string
+                    readonly structured?: JsonValue
+                    readonly error?: {
+                      readonly code: string
+                      readonly message: string
+                      readonly outcomeUnknown?: boolean
+                    }
+                    readonly usage?: {
+                      readonly cost: number
+                      readonly tokens: {
+                        readonly input: number
+                        readonly output: number
+                        readonly reasoning: number
+                        readonly cache: { readonly read: number; readonly write: number }
+                      }
+                    }
                   }
                 }
-              }
-            }
+              | {
+                  readonly type: "team-message"
+                  readonly messageID: string
+                  readonly teamID: string
+                  readonly senderMemberID: string
+                  readonly senderSessionID: string
+                  readonly body: string
+                }
           }
           readonly delivery: "steer" | "queue"
         }
@@ -1414,30 +1517,54 @@ export type SessionsEventsOutput =
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
-          readonly internal?: {
-            readonly type: "model-call-result"
-            readonly result: {
-              readonly callID: string
-              readonly parentSessionID: string
-              readonly childSessionID: string
-              readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-              readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-              readonly mode: "foreground" | "background"
-              readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-              readonly text?: string
-              readonly structured?: unknown
-              readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-              readonly usage?: {
-                readonly cost: number
-                readonly tokens: {
-                  readonly input: number
-                  readonly output: number
-                  readonly reasoning: number
-                  readonly cache: { readonly read: number; readonly write: number }
+          readonly internal?:
+            | {
+                readonly type: "model-call-result"
+                readonly result: {
+                  readonly callID: string
+                  readonly parentSessionID: string
+                  readonly childSessionID: string
+                  readonly requestedModel: {
+                    readonly id: string
+                    readonly providerID: string
+                    readonly variant?: string
+                  }
+                  readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                  readonly mode: "foreground" | "background"
+                  readonly status:
+                    | "preparing"
+                    | "queued"
+                    | "running"
+                    | "completed"
+                    | "failed"
+                    | "cancelled"
+                    | "interrupted"
+                  readonly text?: string
+                  readonly structured?: unknown
+                  readonly error?: {
+                    readonly code: string
+                    readonly message: string
+                    readonly outcomeUnknown?: boolean
+                  }
+                  readonly usage?: {
+                    readonly cost: number
+                    readonly tokens: {
+                      readonly input: number
+                      readonly output: number
+                      readonly reasoning: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }
+                  }
                 }
               }
-            }
-          }
+            | {
+                readonly type: "team-message"
+                readonly messageID: string
+                readonly teamID: string
+                readonly senderMemberID: string
+                readonly senderSessionID: string
+                readonly body: string
+              }
         }
         readonly delivery: "steer" | "queue"
       }
@@ -1465,30 +1592,54 @@ export type SessionsEventsOutput =
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
-          readonly internal?: {
-            readonly type: "model-call-result"
-            readonly result: {
-              readonly callID: string
-              readonly parentSessionID: string
-              readonly childSessionID: string
-              readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-              readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-              readonly mode: "foreground" | "background"
-              readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-              readonly text?: string
-              readonly structured?: unknown
-              readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-              readonly usage?: {
-                readonly cost: number
-                readonly tokens: {
-                  readonly input: number
-                  readonly output: number
-                  readonly reasoning: number
-                  readonly cache: { readonly read: number; readonly write: number }
+          readonly internal?:
+            | {
+                readonly type: "model-call-result"
+                readonly result: {
+                  readonly callID: string
+                  readonly parentSessionID: string
+                  readonly childSessionID: string
+                  readonly requestedModel: {
+                    readonly id: string
+                    readonly providerID: string
+                    readonly variant?: string
+                  }
+                  readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                  readonly mode: "foreground" | "background"
+                  readonly status:
+                    | "preparing"
+                    | "queued"
+                    | "running"
+                    | "completed"
+                    | "failed"
+                    | "cancelled"
+                    | "interrupted"
+                  readonly text?: string
+                  readonly structured?: unknown
+                  readonly error?: {
+                    readonly code: string
+                    readonly message: string
+                    readonly outcomeUnknown?: boolean
+                  }
+                  readonly usage?: {
+                    readonly cost: number
+                    readonly tokens: {
+                      readonly input: number
+                      readonly output: number
+                      readonly reasoning: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }
+                  }
                 }
               }
-            }
-          }
+            | {
+                readonly type: "team-message"
+                readonly messageID: string
+                readonly teamID: string
+                readonly senderMemberID: string
+                readonly senderSessionID: string
+                readonly body: string
+              }
         }
         readonly delivery: "steer" | "queue"
       }
@@ -1890,30 +2041,46 @@ export type SessionsMessageOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
-        readonly internal?: {
-          readonly type: "model-call-result"
-          readonly result: {
-            readonly callID: string
-            readonly parentSessionID: string
-            readonly childSessionID: string
-            readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly mode: "foreground" | "background"
-            readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-            readonly text?: string
-            readonly structured?: JsonValue
-            readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-            readonly usage?: {
-              readonly cost: number
-              readonly tokens: {
-                readonly input: number
-                readonly output: number
-                readonly reasoning: number
-                readonly cache: { readonly read: number; readonly write: number }
+        readonly internal?:
+          | {
+              readonly type: "model-call-result"
+              readonly result: {
+                readonly callID: string
+                readonly parentSessionID: string
+                readonly childSessionID: string
+                readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly mode: "foreground" | "background"
+                readonly status:
+                  | "preparing"
+                  | "queued"
+                  | "running"
+                  | "completed"
+                  | "failed"
+                  | "cancelled"
+                  | "interrupted"
+                readonly text?: string
+                readonly structured?: JsonValue
+                readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
+                readonly usage?: {
+                  readonly cost: number
+                  readonly tokens: {
+                    readonly input: number
+                    readonly output: number
+                    readonly reasoning: number
+                    readonly cache: { readonly read: number; readonly write: number }
+                  }
+                }
               }
             }
-          }
-        }
+          | {
+              readonly type: "team-message"
+              readonly messageID: string
+              readonly teamID: string
+              readonly senderMemberID: string
+              readonly senderSessionID: string
+              readonly body: string
+            }
         readonly type: "user"
       }
     | {
@@ -2148,6 +2315,126 @@ export type ModelCallDetachOutput = {
   }
 }["data"]
 
+export type TeamsStatusInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type TeamsStatusOutput = {
+  readonly data: {
+    readonly team: {
+      readonly id: string
+      readonly leadSessionID: string
+      readonly leadMemberID: string
+      readonly parentAssistantMessageID: string
+      readonly parentToolCallID: string
+      readonly projectID: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly targetBranch: string
+      readonly baseCommit: string
+      readonly integrationCommit: string
+      readonly status: "preparing" | "active" | "degraded" | "shutting_down" | "closed" | "failed"
+      readonly validation: ReadonlyArray<string>
+      readonly members: ReadonlyArray<{
+        readonly id: string
+        readonly teamID: string
+        readonly sessionID: string
+        readonly name: string
+        readonly role: "lead" | "teammate"
+        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly status: "preparing" | "running" | "idle" | "interrupted" | "stopped" | "failed"
+        readonly workspaceID: string
+        readonly directory: string
+        readonly branch: string
+        readonly baseCommit: string
+        readonly lastIntegratedCommit?: string
+        readonly error?: string
+        readonly time: { readonly created: number; readonly updated: number }
+      }>
+      readonly time: { readonly created: number; readonly updated: number }
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly teamID: string
+      readonly key: string
+      readonly title: string
+      readonly description: string
+      readonly status: "pending" | "in_progress" | "stale" | "completed" | "cancelled"
+      readonly assignee?: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly version: number
+      readonly summary?: string
+      readonly time: { readonly created: number; readonly updated: number }
+    }>
+    readonly submissions: ReadonlyArray<{
+      readonly id: string
+      readonly teamID: string
+      readonly memberID: string
+      readonly taskID: string
+      readonly status:
+        | "preparing"
+        | "queued"
+        | "merging"
+        | "conflicted"
+        | "validating"
+        | "validation_failed"
+        | "ready"
+        | "applying"
+        | "applied"
+        | "stale"
+        | "failed"
+        | "cancelled"
+      readonly baseCommit: string
+      readonly sourceCommit?: string
+      readonly expectedIntegrationCommit: string
+      readonly resultCommit?: string
+      readonly conflicts: ReadonlyArray<string>
+      readonly validationOutput?: string
+      readonly error?: string
+      readonly time: { readonly created: number; readonly updated: number }
+    }>
+  }
+}["data"]
+
+export type TeamsStopInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly member?: { readonly member?: string; readonly force?: boolean }["member"]
+  readonly force?: { readonly member?: string; readonly force?: boolean }["force"]
+}
+
+export type TeamsStopOutput = {
+  readonly data: {
+    readonly team: {
+      readonly id: string
+      readonly leadSessionID: string
+      readonly leadMemberID: string
+      readonly parentAssistantMessageID: string
+      readonly parentToolCallID: string
+      readonly projectID: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly targetBranch: string
+      readonly baseCommit: string
+      readonly integrationCommit: string
+      readonly status: "preparing" | "active" | "degraded" | "shutting_down" | "closed" | "failed"
+      readonly validation: ReadonlyArray<string>
+      readonly members: ReadonlyArray<{
+        readonly id: string
+        readonly teamID: string
+        readonly sessionID: string
+        readonly name: string
+        readonly role: "lead" | "teammate"
+        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly status: "preparing" | "running" | "idle" | "interrupted" | "stopped" | "failed"
+        readonly workspaceID: string
+        readonly directory: string
+        readonly branch: string
+        readonly baseCommit: string
+        readonly lastIntegratedCommit?: string
+        readonly error?: string
+        readonly time: { readonly created: number; readonly updated: number }
+      }>
+      readonly time: { readonly created: number; readonly updated: number }
+    }
+  }
+}["data"]
+
 export type MessagesListInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly limit?: {
@@ -2199,30 +2486,46 @@ export type MessagesListOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
-        readonly internal?: {
-          readonly type: "model-call-result"
-          readonly result: {
-            readonly callID: string
-            readonly parentSessionID: string
-            readonly childSessionID: string
-            readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
-            readonly mode: "foreground" | "background"
-            readonly status: "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-            readonly text?: string
-            readonly structured?: JsonValue
-            readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
-            readonly usage?: {
-              readonly cost: number
-              readonly tokens: {
-                readonly input: number
-                readonly output: number
-                readonly reasoning: number
-                readonly cache: { readonly read: number; readonly write: number }
+        readonly internal?:
+          | {
+              readonly type: "model-call-result"
+              readonly result: {
+                readonly callID: string
+                readonly parentSessionID: string
+                readonly childSessionID: string
+                readonly requestedModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly actualModel: { readonly id: string; readonly providerID: string; readonly variant?: string }
+                readonly mode: "foreground" | "background"
+                readonly status:
+                  | "preparing"
+                  | "queued"
+                  | "running"
+                  | "completed"
+                  | "failed"
+                  | "cancelled"
+                  | "interrupted"
+                readonly text?: string
+                readonly structured?: JsonValue
+                readonly error?: { readonly code: string; readonly message: string; readonly outcomeUnknown?: boolean }
+                readonly usage?: {
+                  readonly cost: number
+                  readonly tokens: {
+                    readonly input: number
+                    readonly output: number
+                    readonly reasoning: number
+                    readonly cache: { readonly read: number; readonly write: number }
+                  }
+                }
               }
             }
-          }
-        }
+          | {
+              readonly type: "team-message"
+              readonly messageID: string
+              readonly teamID: string
+              readonly senderMemberID: string
+              readonly senderSessionID: string
+              readonly body: string
+            }
         readonly type: "user"
       }
     | {

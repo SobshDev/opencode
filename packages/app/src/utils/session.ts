@@ -3,6 +3,7 @@ import type { Session } from "@opencode-ai/sdk/v2/client"
 
 export function normalizeSessionInfo(input: SessionInfo | Session): Session {
   if (!("location" in input)) return input
+  const origin = (input as SessionInfo & { origin?: Session["origin"] }).origin
   return {
     id: input.id,
     slug: input.id,
@@ -16,6 +17,7 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
     title: input.title,
     agent: input.agent,
     model: input.model,
+    origin,
     version: "",
     time: input.time,
     revert: input.revert && {

@@ -274,6 +274,10 @@ const layer = Layer.effect(
     const full = Effect.fn("ShareNext.full")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("full sync", { sessionID: sessionID })
       const info = yield* session.get(sessionID)
+      const sharedInfo: SDK.Session = {
+        ...info,
+        origin: info.origin?.type === "model_call" ? info.origin : undefined,
+      }
       const diffs = yield* session.diff(sessionID)
       const messages = yield* session.messages({ sessionID })
       const models = yield* Effect.forEach(
@@ -290,7 +294,7 @@ const layer = Layer.effect(
       )
 
       yield* sync(sessionID, [
-        { type: "session", data: info },
+        { type: "session", data: sharedInfo },
         ...messages.map((item) => ({ type: "message" as const, data: item.info })),
         ...messages.flatMap((item) => item.parts.map((part) => ({ type: "part" as const, data: part }))),
         { type: "session_diff", data: diffs },

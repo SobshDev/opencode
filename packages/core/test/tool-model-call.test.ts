@@ -3,6 +3,7 @@ import path from "path"
 import { Model } from "@opencode-ai/llm"
 import * as OpenAIChat from "@opencode-ai/llm/protocols/openai-chat"
 import { ModelCall } from "@opencode-ai/schema/model-call"
+import { Team } from "@opencode-ai/schema/team"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Database } from "@opencode-ai/core/database/database"
@@ -28,6 +29,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { TeamV2 } from "@opencode-ai/core/team"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
 import { ModelCallTool } from "@opencode-ai/core/tool/model-call"
 import { Tool } from "@opencode-ai/core/tool/tool"
@@ -263,6 +265,8 @@ const executionLayer = Layer.effect(
           wakeCalls.push(sessionID)
           yield* SessionInput.promoteSteers(db, events, sessionID, Number.MAX_SAFE_INTEGER)
         }),
+      wait: () => Effect.void,
+      whenIdle: (_sessionID, effect) => effect,
       interrupt: (sessionID) =>
         Effect.gen(function* () {
           interruptCalls.push(sessionID)
@@ -286,6 +290,7 @@ const nodes = LayerNode.group([
   SessionProjector.node,
   SessionStore.node,
   SessionV2.node,
+  TeamV2.node,
   ModelCallTool.node,
 ])
 const replacements = [
@@ -617,6 +622,44 @@ describe("ModelCallTool V2 orchestration", () => {
       expect(failure.message).toContain(`Model unavailable: ${providerID}/${outputOnlyID}`)
       expect(yield* calls.list(parentID)).toEqual([])
       expect(resolutions).toEqual([])
+    }),
+  )
+
+  it.effect("rejects delegation from a coordinator-only Team lead", () =>
+    Effect.gen(function* () {
+      const { calls, sessions } = yield* setup
+      const parent = yield* sessions.get(parentID)
+      const teams = yield* TeamV2.Service
+      yield* teams.reserve({
+        leadSessionID: parentID,
+        parentAssistantMessageID: SessionMessage.ID.make("msg_team_spawn"),
+        parentToolCallID: "team-spawn",
+        projectID: parent.projectID,
+        location,
+        targetBranch: "dev",
+        baseCommit: "base",
+        directoryRoot: "/tmp/team-model-call",
+        agent: agentID,
+        permission,
+        members: [
+          {
+            name: Team.Name.make("writer"),
+            model: ModelV2.Ref.make({ providerID, id: modelID }),
+            prompt: "Write the change",
+          },
+        ],
+        tasks: [],
+        validation: [],
+      })
+
+      const failure = yield* invoke(
+        { model: { providerID, id: modelID }, prompt: "Bypass the coordinator guard" },
+        "call-team-lead",
+      ).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(Tool.Failure)
+      expect(failure.message).toContain("coordinator-only")
+      expect(yield* calls.list(parentID)).toEqual([])
     }),
   )
 

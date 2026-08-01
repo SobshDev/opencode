@@ -47,6 +47,10 @@ import type {
   ModelCallCancelOutput,
   ModelCallDetachInput,
   ModelCallDetachOutput,
+  TeamsStatusInput,
+  TeamsStatusOutput,
+  TeamsStopInput,
+  TeamsStopOutput,
   MessagesListInput,
   MessagesListOutput,
   ModelsListInput,
@@ -395,7 +399,7 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}/prompt`,
             body: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
             successStatus: 200,
-            declaredStatuses: [409, 404, 400, 401],
+            declaredStatuses: [409, 400, 404, 401],
             empty: false,
           },
           requestOptions,
@@ -553,6 +557,31 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/model-call/${encodeURIComponent(input.callID)}/detach`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+    },
+    teams: {
+      status: (input: TeamsStatusInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: TeamsStatusOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/team`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      stop: (input: TeamsStopInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: TeamsStopOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/team/stop`,
+            body: { member: input["member"], force: input["force"] },
             successStatus: 200,
             declaredStatuses: [404, 400, 401],
             empty: false,

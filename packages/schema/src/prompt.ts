@@ -1,5 +1,7 @@
 import { Schema } from "effect"
 import { ModelCall } from "./model-call"
+import { Team } from "./team"
+import { SessionID } from "./session-id"
 import { optional } from "./schema"
 import { statics } from "./schema"
 
@@ -44,8 +46,18 @@ export const ModelCallResult = Schema.Struct({
   result: Schema.suspend(() => ModelCall.CallResult),
 }).annotate({ identifier: "Prompt.ModelCallResult" })
 
-export const Internal = Schema.Union([ModelCallResult]).pipe(Schema.toTaggedUnion("type"))
-export type Internal = ModelCallResult
+export interface TeamMessage extends Schema.Schema.Type<typeof TeamMessage> {}
+export const TeamMessage = Schema.Struct({
+  type: Schema.Literal("team-message"),
+  messageID: Team.MessageID,
+  teamID: Team.ID,
+  senderMemberID: Team.MemberID,
+  senderSessionID: SessionID,
+  body: Schema.String,
+}).annotate({ identifier: "Prompt.TeamMessage" })
+
+export const Internal = Schema.Union([ModelCallResult, TeamMessage]).pipe(Schema.toTaggedUnion("type"))
+export type Internal = ModelCallResult | TeamMessage
 
 export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({

@@ -18,6 +18,7 @@ import { IntegrationHandler } from "./handlers/integration"
 import { CredentialHandler } from "./handlers/credential"
 import { ProjectCopyHandler } from "./handlers/project-copy"
 import { ModelCallHandler } from "./handlers/model-call"
+import { TeamHandler } from "./handlers/team"
 
 export const handlers = Layer.mergeAll(
   HealthHandler,
@@ -25,6 +26,7 @@ export const handlers = Layer.mergeAll(
   AgentHandler,
   SessionHandler,
   ModelCallHandler,
+  TeamHandler,
   MessageHandler,
   ModelHandler,
   ProviderHandler,

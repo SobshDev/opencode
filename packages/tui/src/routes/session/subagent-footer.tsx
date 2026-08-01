@@ -35,19 +35,21 @@ export function SubagentFooter() {
       typeof origin.callID === "string" &&
       modelCall?.callID === origin.callID &&
       (!modelCall.parentSessionID || modelCall.parentSessionID === origin.parentSessionID) &&
-      (!modelCall.parentAssistantMessageID ||
-        modelCall.parentAssistantMessageID === origin.parentAssistantMessageID) &&
+      (!modelCall.parentAssistantMessageID || modelCall.parentAssistantMessageID === origin.parentAssistantMessageID) &&
       (!modelCall.parentToolCallID || modelCall.parentToolCallID === origin.parentToolCallID) &&
       (!modelCall.requestedModel || sameModel(modelCall.requestedModel, origin.requestedModel))
         ? modelCall
         : undefined
     const call = origin?.type === "model_call" ? { ...origin, ...matched } : undefined
+    const team = origin?.type === "team_member" ? origin : undefined
     const agentMatch = s.title.match(/@(\w+) subagent/)
     const label = call
       ? `Model Call · ${format(call.actualModel ?? s.model ?? call.requestedModel)}`
-      : agentMatch
-        ? Locale.titlecase(agentMatch[1])
-        : "Child session"
+      : team
+        ? s.title
+        : agentMatch
+          ? Locale.titlecase(agentMatch[1])
+          : "Child session"
     const detail = call
       ? [
           call.mode === "background" || call.background === true ? "background" : "foreground",

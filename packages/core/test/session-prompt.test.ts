@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { DateTime, Effect, Fiber, Layer, Stream } from "effect"
+import { DateTime, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { eq } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -40,6 +40,8 @@ const execution = Layer.succeed(
       Effect.sync(() => {
         wakeCalls.push(sessionID)
       }),
+    wait: () => Effect.void,
+    whenIdle: (_sessionID, effect) => effect,
   }),
 )
 const it = testEffect(
@@ -159,6 +161,33 @@ describe("SessionV2.prompt", () => {
         prompt: { text: "Fix the failing tests" },
         delivery: "steer",
       })
+    }),
+  )
+
+  it.effect("atomically bounds concurrent pending inbox admission", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const exits = yield* Effect.all(
+        Array.from({ length: SessionInput.MAX_PENDING_INPUTS + 8 }, (_, index) =>
+          session
+            .prompt({
+              id: SessionMessage.ID.create(),
+              sessionID,
+              prompt: { text: `input-${index}` },
+              resume: false,
+            })
+            .pipe(Effect.exit),
+        ),
+        { concurrency: "unbounded" },
+      )
+
+      expect(exits.filter(Exit.isSuccess)).toHaveLength(SessionInput.MAX_PENDING_INPUTS)
+      expect(exits.filter(Exit.isFailure)).toHaveLength(8)
+      expect(yield* admittedCount).toBe(SessionInput.MAX_PENDING_INPUTS)
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1))).toBe(
+        SessionInput.MAX_PENDING_INPUTS,
+      )
     }),
   )
 

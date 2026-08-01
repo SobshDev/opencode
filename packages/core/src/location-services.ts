@@ -35,6 +35,7 @@ import { SystemContextRegistry } from "./system-context/registry"
 import { BuiltInTools } from "./tool/builtins"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
+import { ApplicationTools } from "./tool/application-tools"
 import { ToolOutputStore } from "./tool-output-store"
 
 export { LocationServiceMap } from "./location-service-map"
@@ -81,34 +82,44 @@ export const locationServices = LayerNode.group([
 export type LocationServices = LayerNode.Output<typeof locationServices>
 export type LocationError = LayerNode.Error<typeof locationServices>
 
-export function buildLocationServiceMap(
+export function buildLocationServiceMapShared(
   replacements: LayerNode.Replacements = [],
-): Layer.Layer<LocationServiceMap.Service> {
+): Layer.Layer<LocationServiceMap.Service, never, ApplicationTools.Service> {
   return Layer.effect(
     LocationServiceMap.Service,
-    LayerMap.make(
-      (ref: Location.Ref) => {
-        const allReplacements = replacements.concat([[Location.node, Location.boundNode(ref)]])
-        // Apply replacements during hoist, not afterward: replacements can
-        // introduce new tagged dependencies (Location.boundNode depends on
-        // Project), and the hoist walk is the only pass that can still slice
-        // those back out.
-        const location = LayerNode.hoist(locationServices, Node.tags.values.global, allReplacements)
+    Effect.gen(function* () {
+      const applications = yield* ApplicationTools.Service
+      return yield* LayerMap.make(
+        (ref: Location.Ref) => {
+          const allReplacements = replacements.concat([
+            [ApplicationTools.node, Layer.succeed(ApplicationTools.Service)(applications)],
+            [Location.node, Location.boundNode(ref)],
+          ])
+          // Apply replacements during hoist, not afterward: replacements can
+          // introduce new tagged dependencies (Location.boundNode depends on
+          // Project), and the hoist walk is the only pass that can still slice
+          // those back out.
+          const location = LayerNode.hoist(locationServices, Node.tags.values.global, allReplacements)
 
-        return LayerNode.compile(location.node).pipe(
-          Layer.fresh,
-          Layer.tap(() =>
-            Effect.logInfo("booting location services", {
-              directory: ref.directory,
-              workspaceID: ref.workspaceID,
-            }),
-          ),
-          Layer.provide(LayerNode.compile(location.hoisted)),
-        )
-      },
-      { idleTimeToLive: "60 minutes" },
-    ),
+          return LayerNode.compile(location.node).pipe(
+            Layer.fresh,
+            Layer.tap(() =>
+              Effect.logInfo("booting location services", {
+                directory: ref.directory,
+                workspaceID: ref.workspaceID,
+              }),
+            ),
+            Layer.provide(LayerNode.compile(location.hoisted)),
+          )
+        },
+        { idleTimeToLive: "60 minutes" },
+      )
+    }),
   )
+}
+
+export function buildLocationServiceMap(replacements: LayerNode.Replacements = []) {
+  return buildLocationServiceMapShared(replacements).pipe(Layer.provide(LayerNode.compile(ApplicationTools.node)))
 }
 
 // This is temporary for backwards compatibility

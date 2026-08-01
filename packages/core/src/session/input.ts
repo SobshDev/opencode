@@ -15,6 +15,9 @@ type DatabaseService = Database.Interface["db"]
 
 export { Admitted, Delivery }
 
+export const MAX_PENDING_INPUTS = 64
+export const MAX_STEERS_PER_TURN = 8
+
 const decodePrompt = Schema.decodeUnknownSync(Prompt)
 const encodePrompt = Schema.encodeSync(Prompt)
 
@@ -38,6 +41,34 @@ export class LifecycleConflict extends Schema.TaggedErrorClass<LifecycleConflict
   id: SessionMessage.ID,
 }) {}
 
+export class InboxFullError extends Schema.TaggedErrorClass<InboxFullError>()("SessionInput.InboxFullError", {
+  sessionID: SessionSchema.ID,
+  limit: Schema.Number,
+}) {}
+
+class PendingInboxOverflow extends Error {
+  constructor(readonly limit: number) {
+    super()
+  }
+}
+
+export const pendingCount = Effect.fn("SessionInput.pendingCount")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  limit = MAX_PENDING_INPUTS + 1,
+) {
+  return yield* db
+    .select({ id: SessionInputTable.id })
+    .from(SessionInputTable)
+    .where(and(eq(SessionInputTable.session_id, sessionID), isNull(SessionInputTable.promoted_seq)))
+    .limit(limit)
+    .all()
+    .pipe(
+      Effect.orDie,
+      Effect.map((rows) => rows.length),
+    )
+})
+
 export const admit = Effect.fn("SessionInput.admit")(function* (
   db: DatabaseService,
   events: EventV2.Interface,
@@ -46,19 +77,34 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly pendingLimit?: number
   },
 ) {
+  const pendingLimit = input.pendingLimit ?? MAX_PENDING_INPUTS
   const existing = yield* find(db, input.id)
   if (existing !== undefined) return existing
+  if ((yield* pendingCount(db, input.sessionID, pendingLimit)) >= pendingLimit)
+    return yield* new InboxFullError({ sessionID: input.sessionID, limit: pendingLimit })
   const timestamp = yield* DateTime.now
   return yield* events
-    .publish(SessionEvent.PromptAdmitted, {
-      messageID: input.id,
-      sessionID: input.sessionID,
-      timestamp,
-      prompt: input.prompt,
-      delivery: input.delivery,
-    })
+    .publish(
+      SessionEvent.PromptAdmitted,
+      {
+        messageID: input.id,
+        sessionID: input.sessionID,
+        timestamp,
+        prompt: input.prompt,
+        delivery: input.delivery,
+      },
+      {
+        commit: () =>
+          pendingCount(db, input.sessionID, pendingLimit + 1).pipe(
+            Effect.flatMap((count) =>
+              count > pendingLimit ? Effect.die(new PendingInboxOverflow(pendingLimit)) : Effect.void,
+            ),
+          ),
+      },
+    )
     .pipe(
       Effect.flatMap((event) =>
         event.durable === undefined
@@ -75,7 +121,9 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
             ),
       ),
       Effect.catchDefect((defect) =>
-        find(db, input.id).pipe(Effect.flatMap((stored) => (stored ? Effect.succeed(stored) : Effect.die(defect)))),
+        defect instanceof PendingInboxOverflow
+          ? new InboxFullError({ sessionID: input.sessionID, limit: defect.limit })
+          : find(db, input.id).pipe(Effect.flatMap((stored) => (stored ? Effect.succeed(stored) : Effect.die(defect)))),
       ),
     )
 })
@@ -260,6 +308,7 @@ export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
       ),
     )
     .orderBy(asc(SessionInputTable.admitted_seq))
+    .limit(MAX_STEERS_PER_TURN)
     .all()
     .pipe(Effect.orDie)
   return yield* publish(db, events, sessionID, rows)

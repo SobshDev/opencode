@@ -106,6 +106,10 @@ export function createSessionComposerRegionController(input: {
     const id = input.sessionID()
     return id ? sync().session.get(id)?.parentID : undefined
   })
+  const teamMember = createMemo(() => {
+    const id = input.sessionID()
+    return id ? sync().session.get(id)?.origin?.type === "team_member" : false
+  })
   const open = createMemo(() => store.ready && input.state.dock() && !input.state.closing())
   const progress = useSpring(
     () => (open() ? 1 : 0),
@@ -131,6 +135,7 @@ export function createSessionComposerRegionController(input: {
     setDockRef: input.setDockRef,
     parentID,
     child: () => !!parentID(),
+    teamMember,
     showComposer: () => !input.state.blocked() || !!parentID(),
     handoffPrompt: () => getSessionHandoff(input.sessionKey())?.prompt,
     promptReady: () => input.prompt.ready() || promptReady(),

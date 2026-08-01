@@ -1,5 +1,6 @@
-import { buildLocationServiceMap } from "../location-services"
+import { buildLocationServiceMapShared } from "../location-services"
 import { LocationServiceMap } from "../location-service-map"
+import { ApplicationTools } from "../tool/application-tools"
 import { LayerNode } from "./layer-node"
 import { makeGlobalNode } from "./app-node"
 
@@ -8,8 +9,12 @@ export function build<A, E>(root: LayerNode.Node<A, E, any>, replacements: Layer
 
   // Only build the location service map if it's actually needed
   if (LayerNode.hasUnbound(root, LocationServiceMap.node) && !hasReplacement(replacements, LocationServiceMap.node)) {
-    const locationMap = buildLocationServiceMap(replacements)
-    const locationMapNode = makeGlobalNode({ service: LocationServiceMap.Service, layer: locationMap, deps: [] })
+    const locationMap = buildLocationServiceMapShared(replacements)
+    const locationMapNode = makeGlobalNode({
+      service: LocationServiceMap.Service,
+      layer: locationMap,
+      deps: [ApplicationTools.node],
+    })
     allReplacements = replacements.concat([[LocationServiceMap.node, locationMapNode]])
   }
 

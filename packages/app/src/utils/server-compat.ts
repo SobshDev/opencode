@@ -59,7 +59,7 @@ function mime(uri: string) {
 }
 
 function sessionInfo(session: Session): SessionInfo {
-  return {
+  const info: SessionInfo & { origin?: Session["origin"] } = {
     id: session.id,
     parentID: session.parentID,
     projectID: session.projectID,
@@ -69,6 +69,7 @@ function sessionInfo(session: Session): SessionInfo {
       providerID: session.model.providerID,
       variant: session.model.variant,
     },
+    origin: session.origin,
     cost: session.cost ?? 0,
     tokens: session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     time: session.time,
@@ -81,6 +82,7 @@ function sessionInfo(session: Session): SessionInfo {
       snapshot: session.revert.snapshot,
     },
   }
+  return info
 }
 
 export function createCompatibleApi(input: CompatibleInput): CompatibleApi {
