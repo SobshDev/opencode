@@ -2,6 +2,7 @@ export * as CallableModels from "./callable-model"
 
 import { ModelCall } from "@opencode-ai/schema/model-call"
 import { ModelV2 } from "./model"
+import { ConfigModelCall } from "./config/model-call"
 
 export const DEFAULT_LIMIT = 20
 
@@ -10,13 +11,14 @@ export interface SearchEntry {
   readonly released: number
 }
 
-export function project(model: ModelV2.Info): ModelCall.CallableModel {
+export function project(model: ModelV2.Info, description?: string): ModelCall.CallableModel {
   return {
     ref: {
       id: model.id,
       providerID: model.providerID,
     },
     name: model.name,
+    ...(description === undefined ? {} : { description }),
     ...(model.family === undefined ? {} : { family: model.family }),
     capabilities: {
       tools: model.capabilities.tools,
@@ -44,6 +46,11 @@ export function project(model: ModelV2.Info): ModelCall.CallableModel {
 
 export const fromModel = (model: ModelV2.Info): SearchEntry => ({
   item: project(model),
+  released: model.time.released,
+})
+
+export const fromConfiguredModel = (model: ModelV2.Info, description: string | undefined): SearchEntry => ({
+  item: project(model, description),
   released: model.time.released,
 })
 
@@ -78,12 +85,21 @@ function searchable(model: ModelCall.CallableModel) {
     model.ref.providerID,
     model.ref.id,
     model.name,
+    model.description,
     model.family,
     ...model.variants,
   ]
     .filter((value) => value !== undefined)
     .join(" ")
     .toLowerCase()
+}
+
+export function allowed(policy: ConfigModelCall.Info | undefined, model: ModelV2.Info) {
+  return policy === undefined || policy.models[`${model.providerID}/${model.id}`] !== undefined
+}
+
+export function description(policy: ConfigModelCall.Info | undefined, model: ModelV2.Info) {
+  return policy?.models[`${model.providerID}/${model.id}`]?.description
 }
 
 function relevance(model: ModelCall.CallableModel, query: string | undefined) {

@@ -7,6 +7,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { ModelsTool } from "@opencode-ai/core/tool/models"
 import { Tool } from "@opencode-ai/core/tool/tool"
+import { ConfigModelCall } from "@opencode-ai/core/config/model-call"
 import { Effect } from "effect"
 import { it } from "./lib/effect"
 import { toolIdentity } from "./lib/tool"
@@ -67,7 +68,7 @@ const context = {
 }
 
 describe("ModelsTool", () => {
-  it.effect("projects a safe callable catalog without a per-target allowlist", () =>
+  it.effect("projects a safe callable catalog without a model_call allowlist", () =>
     Effect.gen(function* () {
       const tool = ModelsTool.make(catalog, (model) => Effect.succeed(model.id !== unresolved.id))
       expect(Tool.permission(tool, ModelsTool.name)).toBe("models")
@@ -101,6 +102,54 @@ describe("ModelsTool", () => {
       })
       expect(JSON.stringify(output)).not.toContain("secret")
       expect(output.content).toEqual([{ type: "text", text: JSON.stringify(output.structured) }])
+    }),
+  )
+
+  it.effect("only returns configured models with searchable usage descriptions", () =>
+    Effect.gen(function* () {
+      const tool = ModelsTool.make(
+        catalog,
+        () => Effect.succeed(true),
+        new ConfigModelCall.Info({
+          models: {
+            "anthropic/claude-sonnet": new ConfigModelCall.Model({
+              description: "Use for repository-wide implementation work",
+            }),
+          },
+        }),
+      )
+
+      const output = yield* Tool.settle(
+        tool,
+        {
+          type: "tool-call",
+          id: "call-configured-models",
+          name: ModelsTool.name,
+          input: { query: "repository-wide" },
+        },
+        context,
+      )
+
+      expect(output.structured).toMatchObject({
+        items: [
+          {
+            ref: { providerID: "anthropic", id: "claude-sonnet" },
+            description: "Use for repository-wide implementation work",
+          },
+        ],
+      })
+    }),
+  )
+
+  it.effect("returns no models for an explicit empty allowlist", () =>
+    Effect.gen(function* () {
+      const tool = ModelsTool.make(catalog, () => Effect.succeed(true), new ConfigModelCall.Info({ models: {} }))
+      const output = yield* Tool.settle(
+        tool,
+        { type: "tool-call", id: "call-no-models", name: ModelsTool.name, input: {} },
+        context,
+      )
+      expect(output.structured).toEqual({ items: [] })
     }),
   )
 })

@@ -3,6 +3,7 @@ import { Model } from "@opencode-ai/schema/model"
 import { ModelCall } from "@opencode-ai/schema/model-call"
 import { Effect } from "effect"
 import { Provider } from "@/provider/provider"
+import { Config } from "@/config/config"
 import { Tool } from "./tool"
 
 export const Parameters = ModelCall.ListInput
@@ -11,21 +12,26 @@ export const ModelsTool = Tool.define(
   "models",
   Effect.gen(function* () {
     const provider = yield* Provider.Service
+    const config = yield* Config.Service
 
     return {
       description: [
         "Search the models available to this session for delegation with model_call.",
-        "Use query to match provider, model, family, or variant names; providerID and tools provide exact filters.",
+        "Use query to match provider, model, family, variant, or configured usage descriptions; providerID and tools provide exact filters.",
         "Results contain only safe public capabilities and never include credentials, request headers, or provider settings.",
         "Use nextCursor as cursor to continue a paginated search.",
       ].join("\n"),
       parameters: Parameters,
       execute: (input: ModelCall.ListInput) =>
         Effect.gen(function* () {
+          const policy = (yield* config.get()).model_call
           const providers = yield* provider.list()
           const models = Object.values(providers).flatMap((item) =>
             Object.values(item.models).filter(
-              (model) => model.capabilities.input.text && model.capabilities.output.text,
+              (model) =>
+                (policy === undefined || policy.models[`${model.providerID}/${model.id}`] !== undefined) &&
+                model.capabilities.input.text &&
+                model.capabilities.output.text,
             ),
           )
           const callable = (yield* Effect.forEach(
@@ -39,7 +45,12 @@ export const ModelsTool = Tool.define(
                 ),
             { concurrency: "unbounded" },
           )).filter((model) => model !== undefined)
-          const output = CallableModels.search(callable.map(toCallableModel), input)
+          const output = CallableModels.search(
+            callable.map((model) =>
+              toCallableModel(model, policy?.models[`${model.providerID}/${model.id}`]?.description),
+            ),
+            input,
+          )
           return {
             title: "Available models",
             metadata: {
@@ -53,7 +64,7 @@ export const ModelsTool = Tool.define(
   }),
 )
 
-function toCallableModel(model: Provider.Model): CallableModels.SearchEntry {
+function toCallableModel(model: Provider.Model, description?: string): CallableModels.SearchEntry {
   const released = Date.parse(model.release_date)
   return {
     item: {
@@ -63,6 +74,7 @@ function toCallableModel(model: Provider.Model): CallableModels.SearchEntry {
       },
       ...(model.family === undefined ? {} : { family: Model.Family.make(model.family) }),
       name: model.name,
+      ...(description === undefined ? {} : { description }),
       capabilities: {
         tools: model.capabilities.toolcall,
         input: Object.entries(model.capabilities.input)

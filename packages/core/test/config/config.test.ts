@@ -5,6 +5,7 @@ import { Effect, Layer, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigProvider } from "@opencode-ai/core/config/provider"
+import { ConfigModelCall } from "@opencode-ai/core/config/model-call"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigMigrateV1 } from "@opencode-ai/core/v1/config/migrate"
@@ -63,6 +64,52 @@ describe("Config", () => {
 
       expect(Config.latest(entries, "model")).toBe("openrouter/openai/gpt-5.5")
       expect(Config.latest(entries, "default_agent")).toBeUndefined()
+    }),
+  )
+
+  it.effect("replaces model_call configuration at the nearest defining document", () =>
+    Effect.sync(() => {
+      const entries = [
+        new Config.Document({
+          type: "document",
+          info: new Config.Info({
+            model_call: new ConfigModelCall.Info({
+              models: { "openrouter/global": new ConfigModelCall.Model({ description: "Global model" }) },
+            }),
+          }),
+        }),
+        new Config.Document({ type: "document", info: new Config.Info({}) }),
+        new Config.Document({
+          type: "document",
+          info: new Config.Info({
+            model_call: new ConfigModelCall.Info({
+              models: { "openrouter/project": new ConfigModelCall.Model({ description: "Project model" }) },
+            }),
+          }),
+        }),
+      ]
+
+      expect(Config.latest(entries, "model_call")?.models).toEqual({
+        "openrouter/project": { description: "Project model" },
+      })
+    }),
+  )
+
+  it.effect("migrates v1 model_call configuration", () =>
+    Effect.sync(() => {
+      expect(
+        ConfigMigrateV1.migrate({
+          model_call: { models: { "openrouter/reviewer": { description: "Review implementation changes" } } },
+        }).model_call,
+      ).toEqual({ models: { "openrouter/reviewer": { description: "Review implementation changes" } } })
+    }),
+  )
+
+  it.effect("requires exact model references and meaningful descriptions", () =>
+    Effect.sync(() => {
+      const decode = Schema.decodeUnknownSync(ConfigModelCall.Info)
+      expect(() => decode({ models: { invalid: { description: "Review code" } } })).toThrow()
+      expect(() => decode({ models: { "openrouter/model": { description: "   " } } })).toThrow()
     }),
   )
 

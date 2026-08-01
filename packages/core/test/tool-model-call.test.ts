@@ -33,6 +33,8 @@ import { ModelCallTool } from "@opencode-ai/core/tool/model-call"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import { DateTime, Deferred, Effect, Fiber, Layer, LayerMap, Option, Schema } from "effect"
 import { eq } from "drizzle-orm"
+import { Config } from "@opencode-ai/core/config"
+import { ConfigModelCall } from "@opencode-ai/core/config/model-call"
 import { it as effectIt, testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -76,6 +78,7 @@ const resolutions: Array<{ session: SessionV2.Info; agent: AgentV2.Info | undefi
 const permissionAssertions: PermissionV2.AssertInput[] = []
 let permissionMode: "allow" | "ask" | "deny" = "allow"
 let permissionGate: Deferred.Deferred<void> | undefined
+let modelCallConfig: Config.Info["model_call"]
 const catalog = Catalog.Service.of({
   transform: () => Effect.die("unused"),
   reload: () => Effect.die("unused"),
@@ -131,6 +134,17 @@ const locationRuntime = Layer.mergeAll(
   Layer.succeed(AgentV2.Service, agents),
   Layer.succeed(SessionRunnerModel.Service, resolver),
   Layer.succeed(PermissionV2.Service, permissionService),
+  Layer.succeed(
+    Config.Service,
+    Config.Service.of({
+      entries: () =>
+        Effect.succeed(
+          modelCallConfig === undefined
+            ? []
+            : [new Config.Document({ type: "document", info: new Config.Info({ model_call: modelCallConfig }) })],
+        ),
+    }),
+  ),
 )
 const locationMapLayer = Layer.effect(
   LocationServiceMap.Service,
@@ -310,6 +324,7 @@ const setup = Effect.gen(function* () {
   permissionAssertions.length = 0
   permissionMode = "allow"
   permissionGate = undefined
+  modelCallConfig = undefined
   gates.clear()
   const sessions = yield* SessionV2.Service
   yield* sessions.create({
@@ -375,6 +390,11 @@ describe("ModelCallTool V2 orchestration", () => {
   it.live("creates a fresh exact-model child with inherited runtime context", () =>
     Effect.gen(function* () {
       const { calls, sessions } = yield* setup
+      modelCallConfig = new ConfigModelCall.Info({
+        models: {
+          [`${providerID}/${modelID}`]: new ConfigModelCall.Model({ description: "Use for code review" }),
+        },
+      })
       const db = (yield* Database.Service).db
       const events = yield* EventV2.Service
       yield* sessions.prompt({
@@ -596,6 +616,23 @@ describe("ModelCallTool V2 orchestration", () => {
 
       expect(failure.message).toContain(`Model unavailable: ${providerID}/${outputOnlyID}`)
       expect(yield* calls.list(parentID)).toEqual([])
+      expect(resolutions).toEqual([])
+    }),
+  )
+
+  it.effect("rejects models outside the model_call allowlist before permission or reservation", () =>
+    Effect.gen(function* () {
+      const { calls } = yield* setup
+      modelCallConfig = new ConfigModelCall.Info({ models: {} })
+
+      const failure = yield* invoke(
+        { model: { providerID, id: modelID }, prompt: "Do not run this model" },
+        "call-not-allowlisted",
+      ).pipe(Effect.flip)
+
+      expect(failure.message).toContain(`Model unavailable: ${providerID}/${modelID}`)
+      expect(yield* calls.list(parentID)).toEqual([])
+      expect(permissionAssertions).toEqual([])
       expect(resolutions).toEqual([])
     }),
   )

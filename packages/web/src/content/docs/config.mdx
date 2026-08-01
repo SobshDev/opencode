@@ -391,6 +391,29 @@ Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
 
 You can also configure [local models](/docs/models#local). [Learn more](/docs/models).
 
+#### Model call allowlist
+
+Use `model_call.models` to limit the models available to the model-facing [`models`](/docs/tools#models) and [`model_call`](/docs/tools#model_call) tools. Each key is an exact `provider/model` reference and its description tells the calling model when to select it.
+
+```jsonc title="opencode.jsonc"
+{
+  "model_call": {
+    "models": {
+      "openrouter/anthropic/claude-opus-4.1": {
+        "description": "Use for difficult implementation and architecture work",
+      },
+      "openrouter/google/gemini-2.5-pro": {
+        "description": "Use for large-context repository exploration",
+      },
+    },
+  },
+}
+```
+
+When `model_call` is omitted, all otherwise available and resolvable text models can be called. An empty `models` object disables model calls. Configuring an allowlist does not affect normal model selection or provider availability.
+
+The nearest project configuration that defines `model_call` replaces the global `model_call` configuration instead of merging with it. This lets a project define a complete, purpose-specific set of callable models. Variants reported for an allowed model remain callable.
+
 ---
 
 ### Policies

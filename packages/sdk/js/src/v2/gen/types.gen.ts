@@ -1217,6 +1217,7 @@ export type GlobalEvent = {
           origin: ModelCallOrigin
           requestedModel: ModelRef
           prompt: string
+          system?: string
           background: boolean
           output_schema?: {
             [key: string]: unknown
@@ -1315,6 +1316,7 @@ export type GlobalEvent = {
         properties: {
           timestamp: number
           callID: string
+          error?: ModelCallError
           usage?: ModelCallUsage
         }
       }
@@ -2085,6 +2087,7 @@ export type Config = {
   disabled_providers?: Array<string>
   enabled_providers?: Array<string>
   model?: string
+  model_call?: ConfigModelCall
   small_model?: string
   default_agent?: string
   subagent_depth?: number
@@ -3347,6 +3350,12 @@ export type SessionNotFoundError = {
   message: string
 }
 
+export type ServiceUnavailableError = {
+  _tag: "ServiceUnavailableError"
+  message: string
+  service?: string
+}
+
 export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
@@ -3357,12 +3366,6 @@ export type ConflictError = {
   _tag: "ConflictError"
   message: string
   resource?: string
-}
-
-export type ServiceUnavailableError = {
-  _tag: "ServiceUnavailableError"
-  message: string
-  service?: string
 }
 
 export type MessageNotFoundError = {
@@ -4570,6 +4573,7 @@ export type SyncEventModelCallRequested = {
       origin: ModelCallOrigin
       requestedModel: ModelRef
       prompt: string
+      system?: string
       background: boolean
       output_schema?: {
         [key: string]: unknown
@@ -4724,6 +4728,7 @@ export type SyncEventModelCallInterrupted = {
     data: {
       timestamp: number
       callID: string
+      error?: ModelCallError
       usage?: ModelCallUsage
     }
   }
@@ -4770,6 +4775,22 @@ export type ConfigV2ReferenceLocal = {
   path: string
   description?: string
   hidden?: boolean
+}
+
+export type ConfigModelCallModel = {
+  /**
+   * When this model should be selected for delegated work
+   */
+  description: string
+}
+
+export type ConfigModelCall = {
+  /**
+   * Models callable through model_call, keyed by exact provider/model reference
+   */
+  models: {
+    [key: string]: unknown | ConfigModelCallModel
+  }
 }
 
 export type PolicyEffect = "allow" | "deny"
@@ -6247,6 +6268,7 @@ export type ModelCallRequested = {
     origin: ModelCallOrigin
     requestedModel: ModelRef
     prompt: string
+    system?: string
     background: boolean
     output_schema?: {
       [key: string]: unknown
@@ -6425,6 +6447,7 @@ export type ModelCallInterrupted = {
   data: {
     timestamp: number
     callID: string
+    error?: ModelCallError
     usage?: ModelCallUsage
   }
 }
@@ -7826,6 +7849,7 @@ export type EventModelCallRequested = {
     origin: ModelCallOrigin
     requestedModel: ModelRef
     prompt: string
+    system?: string
     background: boolean
     output_schema?: {
       [key: string]: unknown
@@ -7932,6 +7956,7 @@ export type EventModelCallInterrupted = {
   properties: {
     timestamp: number
     callID: string
+    error?: ModelCallError
     usage?: ModelCallUsage
   }
 }
@@ -12839,6 +12864,10 @@ export type V2SessionSwitchAgentErrors = {
    * SessionNotFoundError
    */
   404: SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
 }
 
 export type V2SessionSwitchAgentError = V2SessionSwitchAgentErrors[keyof V2SessionSwitchAgentErrors]
@@ -12876,6 +12905,10 @@ export type V2SessionSwitchModelErrors = {
    * SessionNotFoundError
    */
   404: SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
 }
 
 export type V2SessionSwitchModelError = V2SessionSwitchModelErrors[keyof V2SessionSwitchModelErrors]
