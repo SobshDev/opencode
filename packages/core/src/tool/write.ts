@@ -15,6 +15,8 @@ import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { TeamV2 } from "../team"
+import { assertTeamCoordinatorReadOnly } from "./team-coordinator"
 
 export const name = "write"
 
@@ -50,6 +52,7 @@ const layer = Layer.effectDiscard(
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
     const permission = yield* PermissionV2.Service
+    const teams = yield* TeamV2.Service
 
     yield* tools
       .register({
@@ -62,6 +65,7 @@ const layer = Layer.effectDiscard(
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
             execute: (input, context) =>
               Effect.gen(function* () {
+                yield* assertTeamCoordinatorReadOnly(teams, context.sessionID)
                 const source = {
                   type: "tool" as const,
                   messageID: context.assistantMessageID,
@@ -85,7 +89,11 @@ const layer = Layer.effectDiscard(
                   source,
                 })
                 return yield* files.writeTextPreservingBom({ target, content: input.content })
-              }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to write ${input.path}` }))),
+              }).pipe(
+                Effect.mapError((error) =>
+                  error instanceof ToolFailure ? error : new ToolFailure({ message: `Unable to write ${input.path}` }),
+                ),
+              ),
           }),
           "edit",
         ),
@@ -97,5 +105,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/write",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, PermissionV2.node],
+  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, PermissionV2.node, TeamV2.node],
 })

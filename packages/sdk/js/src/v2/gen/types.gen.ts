@@ -216,7 +216,7 @@ export type Session = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   permissionV2?: PermissionV2Ruleset
   time: {
     created: number
@@ -659,7 +659,7 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
-  internal?: PromptModelCallResult
+  internal?: PromptModelCallResult | PromptTeamMessage
 }
 
 export type Pty = {
@@ -2388,7 +2388,7 @@ export type GlobalSession = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -2737,7 +2737,7 @@ export type Session1 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -2791,7 +2791,7 @@ export type Session2 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -2852,7 +2852,7 @@ export type Session3 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -2906,7 +2906,7 @@ export type Session4 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -2960,7 +2960,7 @@ export type Session5 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -3014,7 +3014,7 @@ export type Session6 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -3068,7 +3068,7 @@ export type Session7 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -3176,7 +3176,7 @@ export type Session8 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -3230,7 +3230,7 @@ export type Session9 = {
   metadata?: {
     [key: string]: unknown
   }
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   time: {
     created: number
     updated: number
@@ -3715,6 +3715,17 @@ export type ModelCallOrigin = {
   }
 }
 
+export type TeamOrigin = {
+  type: "team_member"
+  teamID: string
+  memberID: string
+  leadSessionID: string
+  parentAssistantMessageID: string
+  parentToolCallID: string
+}
+
+export type SessionOrigin = ModelCallOrigin | TeamOrigin
+
 export type PermissionV2Effect = "allow" | "deny" | "ask"
 
 export type PermissionV2Rule = {
@@ -3789,6 +3800,15 @@ export type PromptAgentAttachment = {
 export type PromptModelCallResult = {
   type: "model-call-result"
   result: ModelCallCallResult
+}
+
+export type PromptTeamMessage = {
+  type: "team-message"
+  messageID: string
+  teamID: string
+  senderMemberID: string
+  senderSessionID: string
+  body: string
 }
 
 export type SessionErrorUnknown = {
@@ -4874,7 +4894,7 @@ export type SessionV2Info = {
   location: LocationRef
   subpath?: string
   revert?: RevertState
-  origin?: ModelCallOrigin
+  origin?: SessionOrigin
   permission?: PermissionV2Ruleset
 }
 
@@ -4930,7 +4950,7 @@ export type SessionMessageUser = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
-  internal?: PromptModelCallResult
+  internal?: PromptModelCallResult | PromptTeamMessage
   type: "user"
 }
 
@@ -5719,6 +5739,123 @@ export type SessionNextRevertCommitted = {
     sessionID: string
     messageID: string
   }
+}
+
+export type TeamStatus = "preparing" | "active" | "degraded" | "shutting_down" | "closed" | "failed"
+
+export type TeamMemberName = string
+
+export type TeamMemberRole = "lead" | "teammate"
+
+export type TeamMemberStatus = "preparing" | "running" | "idle" | "interrupted" | "stopped" | "failed"
+
+export type TeamMember = {
+  id: string
+  teamID: string
+  sessionID: string
+  name: TeamMemberName
+  role: TeamMemberRole
+  model: ModelRef
+  status: TeamMemberStatus
+  workspaceID: string
+  directory: string
+  branch: string
+  baseCommit: string
+  lastIntegratedCommit?: string
+  error?: string
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type TeamInfo = {
+  id: string
+  leadSessionID: string
+  leadMemberID: string
+  parentAssistantMessageID: string
+  parentToolCallID: string
+  projectID: string
+  location: LocationRef
+  targetBranch: string
+  baseCommit: string
+  integrationCommit: string
+  status: TeamStatus
+  validation: Array<string>
+  members: Array<TeamMember>
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type TeamName = string
+
+export type TeamTaskStatus = "pending" | "in_progress" | "stale" | "completed" | "cancelled"
+
+export type TeamTask = {
+  id: string
+  teamID: string
+  key: TeamName
+  title: string
+  description: string
+  status: TeamTaskStatus
+  assignee?: string
+  dependsOn: Array<string>
+  version: number
+  summary?: string
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type TeamSubmissionStatus =
+  | "preparing"
+  | "queued"
+  | "merging"
+  | "conflicted"
+  | "validating"
+  | "validation_failed"
+  | "ready"
+  | "applying"
+  | "applied"
+  | "stale"
+  | "failed"
+  | "cancelled"
+
+export type TeamSubmission = {
+  id: string
+  teamID: string
+  memberID: string
+  taskID: string
+  status: TeamSubmissionStatus
+  baseCommit: string
+  sourceCommit?: string
+  expectedIntegrationCommit: string
+  resultCommit?: string
+  conflicts: Array<string>
+  validationOutput?: string
+  error?: string
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type TeamStatusResult = {
+  team: TeamInfo
+  tasks: Array<TeamTask>
+  submissions: Array<TeamSubmission>
+}
+
+export type TeamStopInput = {
+  member?: TeamMemberName
+  force?: boolean
+}
+
+export type TeamStopResult = {
+  team: TeamInfo
 }
 
 export type ModelApi =
@@ -13507,6 +13644,80 @@ export type V2ModelCallDetachResponses = {
 }
 
 export type V2ModelCallDetachResponse = V2ModelCallDetachResponses[keyof V2ModelCallDetachResponses]
+
+export type V2TeamStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/team"
+}
+
+export type V2TeamStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2TeamStatusError = V2TeamStatusErrors[keyof V2TeamStatusErrors]
+
+export type V2TeamStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: TeamStatusResult
+  }
+}
+
+export type V2TeamStatusResponse = V2TeamStatusResponses[keyof V2TeamStatusResponses]
+
+export type V2TeamStopData = {
+  body: TeamStopInput
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/team/stop"
+}
+
+export type V2TeamStopErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2TeamStopError = V2TeamStopErrors[keyof V2TeamStopErrors]
+
+export type V2TeamStopResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: TeamStopResult
+  }
+}
+
+export type V2TeamStopResponse = V2TeamStopResponses[keyof V2TeamStopResponses]
 
 export type V2SessionMessagesData = {
   body?: never

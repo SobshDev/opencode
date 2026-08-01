@@ -36,6 +36,24 @@ describe("normalizeSessionInfo", () => {
       revert: { messageID: "message-1", partID: "part-1", snapshot: "snapshot" },
     })
   })
+
+  test("preserves Team member origin provenance", () => {
+    const origin = {
+      type: "team_member" as const,
+      teamID: "tem_team",
+      memberID: "mem_writer",
+      leadSessionID: "ses_lead",
+      parentAssistantMessageID: "msg_spawn",
+      parentToolCallID: "call_spawn",
+    }
+    const result = normalizeSessionInfo({
+      ...sessionInfo("ses_writer"),
+      location: { directory: "/repo/team-writer" },
+      origin,
+    } as SessionInfo)
+
+    expect(result.origin).toEqual(origin)
+  })
 })
 
 describe("listAllSessions", () => {

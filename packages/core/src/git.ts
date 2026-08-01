@@ -35,6 +35,10 @@ export class OperationError extends Schema.TaggedErrorClass<OperationError>()("G
     "list_files",
     "diff",
     "restore",
+    "status",
+    "capture_commit",
+    "merge",
+    "apply",
   ]),
   message: Schema.String,
   directory: Schema.optional(AbsolutePath),
@@ -82,6 +86,7 @@ export interface Interface {
   readonly history: {
     readonly head: (repository: Repository) => Effect.Effect<string | undefined>
     readonly branch: (repository: Repository) => Effect.Effect<string | undefined>
+    readonly clean: (repository: Repository) => Effect.Effect<boolean, OperationError>
     readonly defaultRemoteBranch: (repository: Repository, remote?: string) => Effect.Effect<string | undefined>
     readonly rootCommits: (repository: Repository) => Effect.Effect<readonly string[]>
   }
@@ -115,6 +120,9 @@ export interface Interface {
     readonly create: (input: {
       repository: Repository
       directory: AbsolutePath
+      revision?: string
+      branch?: string
+      reuseBranch?: boolean
     }) => Effect.Effect<Repository, WorktreeError>
     readonly remove: (input: {
       repository: Repository
@@ -122,6 +130,11 @@ export interface Interface {
       force: boolean
     }) => Effect.Effect<void, WorktreeError>
     readonly list: (repository: Repository) => Effect.Effect<readonly Worktree[], WorktreeError>
+    readonly deleteBranch: (input: {
+      repository: Repository
+      branch: string
+      force?: boolean
+    }) => Effect.Effect<void, WorktreeError>
   }
   readonly index: {
     /** Refresh only the requested project-relative scope, preserving all other entries. */
@@ -168,6 +181,45 @@ export interface Interface {
     }) => Effect.Effect<void, OperationError>
     readonly checkout: (input: { repository: Repository; tree: TreeID }) => Effect.Effect<void, OperationError>
   }
+  readonly collaboration: {
+    readonly captureCommit: (input: {
+      repository: Repository
+      message: string
+      ref?: string
+    }) => Effect.Effect<{ commit: string; tree: TreeID; changed: boolean }, OperationError>
+    readonly merge: (input: {
+      repository: Repository
+      sourceCommit: string
+      message: string
+    }) => Effect.Effect<{ commit?: string; conflicts: readonly RelativePath[] }, OperationError>
+    readonly applyFastForward: (input: {
+      repository: Repository
+      expectedCommit: string
+      resultCommit: string
+    }) => Effect.Effect<void, OperationError>
+    readonly sync: (input: { repository: Repository; commit: string }) => Effect.Effect<void, OperationError>
+    readonly adopt: (input: { repository: Repository; commit: string }) => Effect.Effect<void, OperationError>
+    readonly matchesCommit: (input: {
+      repository: Repository
+      commit: string
+    }) => Effect.Effect<boolean, OperationError>
+    readonly isAncestor: (input: {
+      repository: Repository
+      ancestor: string
+      descendant: string
+    }) => Effect.Effect<boolean, OperationError>
+    readonly prepareSync: (input: {
+      repository: Repository
+      commit: string
+    }) => Effect.Effect<{ conflicts: readonly RelativePath[] }, OperationError>
+    readonly updateRef: (input: {
+      repository: Repository
+      ref: string
+      commit: string
+      expected?: string
+    }) => Effect.Effect<void, OperationError>
+    readonly deleteRef: (input: { repository: Repository; ref: string }) => Effect.Effect<void, OperationError>
+  }
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/GitV2") {}
@@ -178,8 +230,11 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const proc = yield* AppProcess.Service
     const locks = KeyedMutex.makeUnsafe<string>()
+    const repositoryLocks = KeyedMutex.makeUnsafe<string>()
     const locked = <A, E, R>(repository: Repository, effect: Effect.Effect<A, E, R>) =>
       locks.withLock(repository.gitDirectory)(effect)
+    const repositoryLocked = <A, E, R>(repository: Repository, effect: Effect.Effect<A, E, R>) =>
+      repositoryLocks.withLock(repository.commonDirectory)(effect)
 
     const discover = Effect.fn("Git.repo.discover")(function* (input: AbsolutePath) {
       const dotgit = yield* fs.up({ targets: [".git"], start: input }).pipe(
@@ -230,6 +285,11 @@ const layer = Layer.effect(
       return result.text.trim() || undefined
     })
 
+    const clean = Effect.fn("Git.history.clean")(function* (repository: Repository) {
+      const result = yield* repositoryOperation("status", repository, ["status", "--porcelain=v1", "-z"])
+      return result.text.length === 0
+    })
+
     const remoteHead = Effect.fn("Git.history.defaultRemoteBranch")(function* (
       repository: Repository,
       remoteName = "origin",
@@ -250,12 +310,12 @@ const layer = Layer.effect(
       )(args).pipe(
         Effect.mapError((cause) => new OperationError({ operation, directory, message: cause.message, cause })),
       )
-      if (result.exitCode === 0) return
-      return yield* new OperationError({
-        operation,
-        directory,
-        message: result.stderr.trim() || result.text.trim() || `Git ${operation} failed`,
-      })
+      if (result.exitCode !== 0)
+        yield* new OperationError({
+          operation,
+          directory,
+          message: result.stderr.trim() || result.text.trim() || `Git ${operation} failed`,
+        })
     })
 
     const clone = Effect.fn("Git.repo.clone")(function* (input: {
@@ -624,14 +684,16 @@ const layer = Layer.effect(
         "--",
         file,
       ])).text.replace(/\0$/, "")
-      if (!text) return
+      if (!text) return undefined
       const match = text.match(/^(\d+)\s+\w+\s+([0-9a-f]+)\t/)
-      if (!match)
-        return yield* new OperationError({
+      if (!match) {
+        yield* new OperationError({
           operation: "restore",
           directory: repository.worktree,
           message: `Invalid tree entry for ${file}`,
         })
+        return undefined
+      }
       return { mode: match[1], object: match[2] }
     })
 
@@ -804,13 +866,13 @@ const layer = Layer.effect(
             (cause) => new PatchError({ operation: "apply", directory: input.path, message: cause.message, cause }),
           ),
         )
-      if (result.exitCode === 0) return
-      return yield* new PatchError({
-        operation: "apply",
-        directory: input.path,
-        message:
-          result.stderr.toString("utf8").trim() || result.stdout.toString("utf8").trim() || "Failed to apply changes",
-      })
+      if (result.exitCode !== 0)
+        yield* new PatchError({
+          operation: "apply",
+          directory: input.path,
+          message:
+            result.stderr.toString("utf8").trim() || result.stdout.toString("utf8").trim() || "Failed to apply changes",
+        })
     })
 
     const discard = Effect.fn("Git.change.discard")(function* (input: {
@@ -829,7 +891,7 @@ const layer = Layer.effect(
         ),
       )
       if (restore.exitCode !== 0) {
-        return yield* new PatchError({
+        yield* new PatchError({
           operation: "reset",
           directory: input.path,
           message: restore.stderr.trim() || restore.text.trim() || "Failed to restore tracked changes",
@@ -844,12 +906,12 @@ const layer = Layer.effect(
           (cause) => new PatchError({ operation: "reset", directory: input.path, message: cause.message, cause }),
         ),
       )
-      if (clean.exitCode === 0) return
-      return yield* new PatchError({
-        operation: "reset",
-        directory: input.path,
-        message: clean.stderr.trim() || clean.text.trim() || "Failed to clean untracked changes",
-      })
+      if (clean.exitCode !== 0)
+        yield* new PatchError({
+          operation: "reset",
+          directory: input.path,
+          message: clean.stderr.trim() || clean.text.trim() || "Failed to clean untracked changes",
+        })
     })
 
     const worktreeRun = Effect.fnUntraced(function* (
@@ -879,12 +941,24 @@ const layer = Layer.effect(
     const worktreeCreate = Effect.fn("Git.worktree.create")(function* (input: {
       repository: Repository
       directory: AbsolutePath
+      revision?: string
+      branch?: string
+      reuseBranch?: boolean
     }) {
-      yield* worktreeRun(
-        "create",
+      yield* repositoryLocked(
         input.repository,
-        ["worktree", "add", "--detach", input.directory, "HEAD"],
-        input.directory,
+        worktreeRun(
+          "create",
+          input.repository,
+          [
+            "worktree",
+            "add",
+            ...(input.branch ? (input.reuseBranch ? [] : ["-b", input.branch]) : ["--detach"]),
+            input.directory,
+            input.reuseBranch && input.branch ? input.branch : (input.revision ?? "HEAD"),
+          ],
+          input.directory,
+        ),
       )
       const repository = yield* discover(input.directory)
       if (repository) return repository
@@ -900,12 +974,15 @@ const layer = Layer.effect(
       directory: AbsolutePath
       force: boolean
     }) {
-      yield* worktreeRun(
-        "remove",
+      yield* repositoryLocked(
         input.repository,
-        ["worktree", "remove", ...(input.force ? ["--force"] : []), input.directory],
-        input.directory,
-        input.repository.commonDirectory,
+        worktreeRun(
+          "remove",
+          input.repository,
+          ["worktree", "remove", ...(input.force ? ["--force"] : []), input.directory],
+          input.directory,
+          input.repository.commonDirectory,
+        ),
       )
     })
 
@@ -922,13 +999,329 @@ const layer = Layer.effect(
         )
     })
 
+    const deleteBranch = Effect.fn("Git.worktree.deleteBranch")(function* (input: {
+      repository: Repository
+      branch: string
+      force?: boolean
+    }) {
+      yield* repositoryLocked(
+        input.repository,
+        worktreeRun(
+          "remove",
+          input.repository,
+          ["branch", input.force ? "-D" : "-d", "--", input.branch],
+          undefined,
+          input.repository.commonDirectory,
+        ),
+      )
+    })
+
+    const commitEnvironment = {
+      GIT_AUTHOR_NAME: "OpenCode Team",
+      GIT_AUTHOR_EMAIL: "team@opencode.ai",
+      GIT_COMMITTER_NAME: "OpenCode Team",
+      GIT_COMMITTER_EMAIL: "team@opencode.ai",
+    }
+
+    const captureCommit = Effect.fn("Git.collaboration.captureCommit")(
+      (input: { repository: Repository; message: string; ref?: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            const head = yield* headCommit(input.repository)
+            const index = path.join(input.repository.gitDirectory, `capture-${randomUUID()}.index`)
+            const env = { ...commitEnvironment, GIT_INDEX_FILE: index }
+            return yield* Effect.gen(function* () {
+              yield* repositoryOperation("capture_commit", input.repository, ["read-tree", head], { env })
+              yield* repositoryOperation("capture_commit", input.repository, ["add", "--all"], { env })
+              const tree = TreeID.make(
+                (yield* repositoryOperation("capture_commit", input.repository, ["write-tree"], { env })).text.trim(),
+              )
+              const previous = (yield* repositoryOperation(
+                "capture_commit",
+                input.repository,
+                ["rev-parse", `${head}^{tree}`],
+                { env },
+              )).text.trim()
+              const mergeHead = yield* gitAttempt(input.repository, ["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+              const additionalParents =
+                mergeHead.exitCode === 0
+                  ? mergeHead.text
+                      .split("\n")
+                      .map((item) => item.trim())
+                      .filter(Boolean)
+                  : []
+              if (tree === previous && !additionalParents.length) return { commit: head, tree, changed: false }
+              const commit = (yield* repositoryOperation(
+                "capture_commit",
+                input.repository,
+                [
+                  "commit-tree",
+                  tree,
+                  "-p",
+                  head,
+                  ...additionalParents.flatMap((parent) => ["-p", parent]),
+                  "-m",
+                  input.message,
+                ],
+                { env },
+              )).text.trim()
+              if (input.ref)
+                yield* repositoryOperation("capture_commit", input.repository, ["update-ref", input.ref, commit])
+              return { commit, tree, changed: true }
+            }).pipe(Effect.ensuring(fs.remove(index).pipe(Effect.catch(() => Effect.void))))
+          }),
+        ),
+    )
+
+    const merge = Effect.fn("Git.collaboration.merge")(
+      (input: { repository: Repository; sourceCommit: string; message: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            const result = yield* gitAttempt(
+              input.repository,
+              ["merge", "--no-ff", "--no-commit", input.sourceCommit],
+              {
+                ...commitEnvironment,
+              },
+            )
+            if (result.exitCode !== 0) {
+              const conflicts = (yield* gitAttempt(input.repository, [
+                "diff",
+                "--name-only",
+                "--diff-filter=U",
+                "-z",
+              ])).text
+                .split("\0")
+                .filter(Boolean)
+                .map((item) => RelativePath.make(item))
+              yield* gitAttempt(input.repository, ["merge", "--abort"])
+              if (conflicts.length) return { conflicts }
+              return yield* new OperationError({
+                operation: "merge",
+                directory: input.repository.worktree,
+                message: result.stderr.trim() || result.text.trim() || "Git merge failed",
+              })
+            }
+            const mergeHead = yield* gitAttempt(input.repository, ["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+            if (mergeHead.exitCode === 0)
+              yield* repositoryOperation(
+                "merge",
+                input.repository,
+                ["commit", "--no-verify", "--no-gpg-sign", "-m", input.message],
+                { env: commitEnvironment },
+              )
+            return { commit: yield* headCommit(input.repository), conflicts: [] }
+          }),
+        ),
+    )
+
+    const applyFastForward = Effect.fn("Git.collaboration.applyFastForward")(
+      (input: { repository: Repository; expectedCommit: string; resultCommit: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            if (!(yield* clean(input.repository)))
+              yield* new OperationError({
+                operation: "apply",
+                directory: input.repository.worktree,
+                message: "Target worktree is not clean",
+              })
+            const current = yield* headCommit(input.repository)
+            if (current !== input.expectedCommit)
+              yield* new OperationError({
+                operation: "apply",
+                directory: input.repository.worktree,
+                message: `Target moved from ${input.expectedCommit} to ${current}`,
+              })
+            yield* repositoryOperation("apply", input.repository, ["merge", "--ff-only", input.resultCommit])
+          }),
+        ),
+    )
+
+    const sync = Effect.fn("Git.collaboration.sync")((input: { repository: Repository; commit: string }) =>
+      locked(
+        input.repository,
+        Effect.gen(function* () {
+          if (!(yield* clean(input.repository)))
+            yield* new OperationError({
+              operation: "apply",
+              directory: input.repository.worktree,
+              message: "Member worktree must be clean before synchronization",
+            })
+          yield* repositoryOperation("apply", input.repository, ["reset", "--hard", input.commit])
+        }),
+      ),
+    )
+
+    const adopt = Effect.fn("Git.collaboration.adopt")((input: { repository: Repository; commit: string }) =>
+      locked(
+        input.repository,
+        repositoryOperation("apply", input.repository, ["reset", "--hard", input.commit]).pipe(Effect.asVoid),
+      ),
+    )
+
+    const matchesCommit = Effect.fn("Git.collaboration.matchesCommit")(
+      (input: { repository: Repository; commit: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            const index = path.join(input.repository.gitDirectory, `compare-${randomUUID()}.index`)
+            const env = { GIT_INDEX_FILE: index }
+            const head = yield* headCommit(input.repository)
+            return yield* Effect.gen(function* () {
+              yield* repositoryOperation("capture_commit", input.repository, ["read-tree", head], { env })
+              yield* repositoryOperation("capture_commit", input.repository, ["add", "--all"], { env })
+              const current = (yield* repositoryOperation("capture_commit", input.repository, ["write-tree"], {
+                env,
+              })).text.trim()
+              const expected = (yield* repositoryOperation("capture_commit", input.repository, [
+                "rev-parse",
+                `${input.commit}^{tree}`,
+              ])).text.trim()
+              return current === expected
+            }).pipe(Effect.ensuring(fs.remove(index).pipe(Effect.catch(() => Effect.void))))
+          }),
+        ),
+    )
+
+    const isAncestor = Effect.fn("Git.collaboration.isAncestor")(
+      (input: { repository: Repository; ancestor: string; descendant: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            const result = yield* gitAttempt(input.repository, [
+              "merge-base",
+              "--is-ancestor",
+              input.ancestor,
+              input.descendant,
+            ])
+            if (result.exitCode === 0) return true
+            if (result.exitCode === 1) return false
+            return yield* new OperationError({
+              operation: "status",
+              directory: input.repository.worktree,
+              message: result.stderr.trim() || result.text.trim() || "Unable to compare Git commits",
+            })
+          }),
+        ),
+    )
+
+    const prepareSync = Effect.fn("Git.collaboration.prepareSync")(
+      (input: { repository: Repository; commit: string }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            if (!(yield* clean(input.repository)))
+              return yield* new OperationError({
+                operation: "apply",
+                directory: input.repository.worktree,
+                message: "Member worktree must be clean before synchronization",
+              })
+            const result = yield* gitAttempt(input.repository, ["merge", "--no-ff", "--no-commit", input.commit], {
+              ...commitEnvironment,
+            })
+            if (result.exitCode !== 0) {
+              const conflicts = (yield* gitAttempt(input.repository, [
+                "diff",
+                "--name-only",
+                "--diff-filter=U",
+                "-z",
+              ])).text
+                .split("\0")
+                .filter(Boolean)
+                .map((item) => RelativePath.make(item))
+              if (conflicts.length) return { conflicts }
+              yield* gitAttempt(input.repository, ["merge", "--abort"])
+              return yield* new OperationError({
+                operation: "merge",
+                directory: input.repository.worktree,
+                message: result.stderr.trim() || result.text.trim() || "Git synchronization failed",
+              })
+            }
+            const mergeHead = yield* gitAttempt(input.repository, ["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+            if (mergeHead.exitCode === 0)
+              yield* repositoryOperation(
+                "merge",
+                input.repository,
+                ["commit", "--no-verify", "--no-gpg-sign", "-m", "sync(team): integration head"],
+                { env: commitEnvironment },
+              )
+            return { conflicts: [] }
+          }),
+        ),
+    )
+
+    const updateRef = Effect.fn("Git.collaboration.updateRef")(
+      (input: { repository: Repository; ref: string; commit: string; expected?: string }) =>
+        repositoryLocked(
+          input.repository,
+          repositoryOperation("apply", input.repository, [
+            "update-ref",
+            input.ref,
+            input.commit,
+            ...(input.expected === undefined ? [] : [input.expected]),
+          ]).pipe(Effect.asVoid),
+        ),
+    )
+
+    const deleteRef = Effect.fn("Git.collaboration.deleteRef")((input: { repository: Repository; ref: string }) =>
+      repositoryLocked(
+        input.repository,
+        repositoryOperation("apply", input.repository, ["update-ref", "-d", input.ref]).pipe(Effect.asVoid),
+      ),
+    )
+
+    const headCommit = Effect.fnUntraced(function* (repository: Repository) {
+      const value = yield* head(repository)
+      if (value) return value
+      return yield* new OperationError({
+        operation: "status",
+        directory: repository.worktree,
+        message: "Repository has no HEAD commit",
+      })
+    })
+
+    const gitAttempt = Effect.fnUntraced(function* (
+      repository: Repository,
+      args: string[],
+      env?: Record<string, string>,
+    ) {
+      const result = yield* proc
+        .run(
+          ChildProcess.make("git", args, {
+            cwd: repository.worktree,
+            env,
+            extendEnv: true,
+            stdin: "ignore",
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new OperationError({
+                operation: "merge",
+                directory: repository.worktree,
+                message: cause.message,
+                cause,
+              }),
+          ),
+        )
+      return {
+        exitCode: result.exitCode,
+        text: result.stdout.toString("utf8"),
+        stderr: result.stderr.toString("utf8"),
+      }
+    })
+
     return Service.of({
       repo: { discover, clone, create },
       remote: { get: remote },
-      history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
+      history: { head, branch, clean, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
       change: { capture, apply, discard },
-      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
+      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList, deleteBranch },
       index: { refresh, ignored },
       tree: {
         capture: captureTree,
@@ -938,6 +1331,18 @@ const layer = Layer.effect(
         preview,
         restore,
         checkout: checkoutTree,
+      },
+      collaboration: {
+        captureCommit,
+        merge,
+        applyFastForward,
+        sync,
+        adopt,
+        matchesCommit,
+        isAncestor,
+        prepareSync,
+        updateRef,
+        deleteRef,
       },
     })
   }),

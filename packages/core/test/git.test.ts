@@ -110,6 +110,164 @@ describe("Git worktrees", () => {
   )
 })
 
+describe("Git collaboration", () => {
+  it.live("integrates parallel changes from isolated branch worktrees", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await initRepo(root.path)
+        await fs.writeFile(path.join(root.path, "shared.txt"), "one\ntwo\nthree\nfour\nfive\n")
+        await $`git add shared.txt`.cwd(root.path).quiet()
+        await $`git commit -m initial`.cwd(root.path).quiet()
+      })
+      const git = yield* Git.Service
+      const target = yield* git.repo.discover(AbsolutePath.make(root.path))
+      if (!target) throw new Error("Repository not found")
+      const base = yield* git.history.head(target)
+      if (!base) throw new Error("Missing base commit")
+      const alphaPath = AbsolutePath.make(`${root.path}-alpha`)
+      const betaPath = AbsolutePath.make(`${root.path}-beta`)
+      const integrationPath = AbsolutePath.make(`${root.path}-integration`)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() =>
+          Promise.all(
+            [alphaPath, betaPath, integrationPath].map((directory) =>
+              fs.rm(directory, { recursive: true, force: true }),
+            ),
+          ),
+        ).pipe(Effect.ignore),
+      )
+      const alpha = yield* git.worktree.create({
+        repository: target,
+        directory: alphaPath,
+        revision: base,
+        branch: "opencode/test-alpha",
+      })
+      const beta = yield* git.worktree.create({
+        repository: target,
+        directory: betaPath,
+        revision: base,
+        branch: "opencode/test-beta",
+      })
+
+      yield* Effect.promise(() => fs.writeFile(path.join(alphaPath, "shared.txt"), "one\nalpha\nthree\nfour\nfive\n"))
+      const alphaCommit = yield* git.collaboration.captureCommit({ repository: alpha, message: "alpha" })
+      yield* git.collaboration.adopt({ repository: alpha, commit: alphaCommit.commit })
+      const integrationA = yield* git.worktree.create({
+        repository: target,
+        directory: integrationPath,
+        revision: base,
+      })
+      const mergedA = yield* git.collaboration.merge({
+        repository: integrationA,
+        sourceCommit: alphaCommit.commit,
+        message: "merge alpha",
+      })
+      expect(mergedA.conflicts).toEqual([])
+      yield* git.worktree.remove({ repository: target, directory: integrationPath, force: true })
+      yield* git.collaboration.applyFastForward({
+        repository: target,
+        expectedCommit: base,
+        resultCommit: mergedA.commit!,
+      })
+
+      yield* Effect.promise(() => fs.writeFile(path.join(betaPath, "shared.txt"), "one\ntwo\nthree\nbeta\nfive\n"))
+      const betaCommit = yield* git.collaboration.captureCommit({ repository: beta, message: "beta" })
+      yield* git.collaboration.adopt({ repository: beta, commit: betaCommit.commit })
+      const integrationB = yield* git.worktree.create({
+        repository: target,
+        directory: integrationPath,
+        revision: mergedA.commit!,
+      })
+      const mergedB = yield* git.collaboration.merge({
+        repository: integrationB,
+        sourceCommit: betaCommit.commit,
+        message: "merge beta",
+      })
+      expect(mergedB.conflicts).toEqual([])
+      yield* git.worktree.remove({ repository: target, directory: integrationPath, force: true })
+      yield* git.collaboration.applyFastForward({
+        repository: target,
+        expectedCommit: mergedA.commit!,
+        resultCommit: mergedB.commit!,
+      })
+
+      expect(yield* read(path.join(root.path, "shared.txt"))).toBe("one\nalpha\nthree\nbeta\nfive\n")
+    }),
+  )
+
+  it.live("reports same-hunk conflicts without modifying the target", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await initRepo(root.path)
+        await fs.writeFile(path.join(root.path, "shared.txt"), "before\n")
+        await $`git add shared.txt`.cwd(root.path).quiet()
+        await $`git commit -m initial`.cwd(root.path).quiet()
+      })
+      const git = yield* Git.Service
+      const target = yield* git.repo.discover(AbsolutePath.make(root.path))
+      if (!target) throw new Error("Repository not found")
+      const base = yield* git.history.head(target)
+      if (!base) throw new Error("Missing base commit")
+      const alphaPath = AbsolutePath.make(`${root.path}-conflict-alpha`)
+      const betaPath = AbsolutePath.make(`${root.path}-conflict-beta`)
+      const integrationPath = AbsolutePath.make(`${root.path}-conflict-integration`)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() =>
+          Promise.all(
+            [alphaPath, betaPath, integrationPath].map((directory) =>
+              fs.rm(directory, { recursive: true, force: true }),
+            ),
+          ),
+        ).pipe(Effect.ignore),
+      )
+      const alpha = yield* git.worktree.create({
+        repository: target,
+        directory: alphaPath,
+        revision: base,
+        branch: "opencode/conflict-alpha",
+      })
+      const beta = yield* git.worktree.create({
+        repository: target,
+        directory: betaPath,
+        revision: base,
+        branch: "opencode/conflict-beta",
+      })
+      yield* Effect.promise(() => fs.writeFile(path.join(alphaPath, "shared.txt"), "alpha\n"))
+      yield* Effect.promise(() => fs.writeFile(path.join(betaPath, "shared.txt"), "beta\n"))
+      const alphaCommit = yield* git.collaboration.captureCommit({ repository: alpha, message: "alpha" })
+      const betaCommit = yield* git.collaboration.captureCommit({ repository: beta, message: "beta" })
+      const first = yield* git.worktree.create({ repository: target, directory: integrationPath, revision: base })
+      const mergedA = yield* git.collaboration.merge({
+        repository: first,
+        sourceCommit: alphaCommit.commit,
+        message: "merge alpha",
+      })
+      yield* git.worktree.remove({ repository: target, directory: integrationPath, force: true })
+      const second = yield* git.worktree.create({
+        repository: target,
+        directory: integrationPath,
+        revision: mergedA.commit!,
+      })
+      const mergedB = yield* git.collaboration.merge({
+        repository: second,
+        sourceCommit: betaCommit.commit,
+        message: "merge beta",
+      })
+
+      expect(mergedB.conflicts).toEqual([RelativePath.make("shared.txt")])
+      expect(yield* read(path.join(root.path, "shared.txt"))).toBe("before\n")
+    }),
+  )
+})
+
 describe("Git trees", () => {
   it.live("captures, compares, previews, and restores scoped trees", () =>
     Effect.gen(function* () {

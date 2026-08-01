@@ -232,6 +232,7 @@ import type {
   SyncStartResponses,
   SyncStealErrors,
   SyncStealResponses,
+  TeamStopInput,
   TextPartInput,
   ToolIdsErrors,
   ToolIdsResponses,
@@ -395,6 +396,10 @@ import type {
   V2SessionWaitResponses,
   V2SkillListErrors,
   V2SkillListResponses,
+  V2TeamStatusErrors,
+  V2TeamStatusResponses,
+  V2TeamStopErrors,
+  V2TeamStopResponses,
   VcsApplyErrors,
   VcsApplyResponses,
   VcsDiffErrors,
@@ -6013,6 +6018,62 @@ export class ModelCall extends HeyApiClient {
   }
 }
 
+export class Team extends HeyApiClient {
+  /**
+   * Get Team status
+   *
+   * Inspect the Team roster, tasks, submissions, conflicts, and integration state for a member Session.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2TeamStatusResponses, V2TeamStatusErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/team",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Stop Team work
+   *
+   * Stop one teammate or close a lead-owned Team, preserving dirty worktrees unless force is explicit.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      teamStopInput: TeamStopInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "teamStopInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2TeamStopResponses, V2TeamStopErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/team/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Model extends HeyApiClient {
   /**
    * List models
@@ -7151,6 +7212,11 @@ export class V2 extends HeyApiClient {
   private _modelCall?: ModelCall
   get modelCall(): ModelCall {
     return (this._modelCall ??= new ModelCall({ client: this.client }))
+  }
+
+  private _team?: Team
+  get team(): Team {
+    return (this._team ??= new Team({ client: this.client }))
   }
 
   private _model?: Model

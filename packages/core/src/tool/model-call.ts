@@ -20,7 +20,9 @@ import { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
 import { Prompt } from "../session/prompt"
 import { SessionRunnerModel } from "../session/runner/model"
+import { TeamV2 } from "../team"
 import { ApplicationTools } from "./application-tools"
+import { assertTeamCoordinatorReadOnly } from "./team-coordinator"
 import { Tool } from "./tool"
 
 export const name = "model_call"
@@ -49,6 +51,7 @@ const layer = Layer.effectDiscard(
     const execution = yield* SessionExecution.Service
     const database = yield* Database.Service
     const db = database.db
+    const teams = yield* TeamV2.Service
     const scope = yield* Scope.Scope
 
     const resolveTarget = Effect.fn("ModelCallTool.resolveTarget")(function* (
@@ -487,6 +490,9 @@ const layer = Layer.effectDiscard(
                 if (!validation.valid) return yield* new Tool.Failure({ message: validation.error })
               }
               const parent = yield* sessions.get(context.sessionID)
+              yield* assertTeamCoordinatorReadOnly(teams, context.sessionID)
+              if (parent.origin?.type === "team_member")
+                return yield* new Tool.Failure({ message: "Team teammates cannot create nested model calls" })
               const actualModel = yield* resolveTarget(parent, context, input.model)
               yield* assertPermission(input, context)
               const reserved = yield* calls.reserve({
@@ -562,5 +568,6 @@ export const node = makeGlobalNode({
     SessionExecution.node,
     LocationServiceMap.node,
     Database.node,
+    TeamV2.node,
   ],
 })

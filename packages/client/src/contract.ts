@@ -22,6 +22,7 @@ export const groupNames = {
   "server.agent": "agents",
   "server.session": "sessions",
   "server.modelCall": "modelCall",
+  "server.team": "teams",
   "server.message": "messages",
   "server.model": "models",
   "server.provider": "providers",

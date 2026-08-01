@@ -250,6 +250,8 @@ const execution = Layer.effect(
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
+      wait: coordinator.wait,
+      whenIdle: coordinator.whenIdle,
       interrupt: coordinator.interrupt,
     })
   }),

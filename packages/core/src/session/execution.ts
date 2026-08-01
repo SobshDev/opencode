@@ -13,6 +13,10 @@ export interface Interface {
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
   /** Registers newly recorded work. Repeated wakeups may coalesce. */
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  /** Waits for current process-local execution and queued wake successors to become idle. */
+  readonly wait: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  /** Runs one operation while this process owns the Session key exclusively and it is idle. */
+  readonly whenIdle: <A, E, R>(sessionID: SessionSchema.ID, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
 }
@@ -29,6 +33,8 @@ export const noopLayer = Layer.succeed(
     active: Effect.succeed(new Set()),
     resume: () => Effect.void,
     wake: () => Effect.void,
+    wait: () => Effect.void,
+    whenIdle: (_sessionID, effect) => effect,
     interrupt: () => Effect.void,
   }),
 )

@@ -38,7 +38,7 @@ import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { Permission } from "@opencode-ai/schema/permission"
-import { ModelCall } from "@opencode-ai/schema/model-call"
+import { SessionOrigin } from "@opencode-ai/schema/session-origin"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -83,7 +83,7 @@ type CreateInput = {
   parentID?: SessionSchema.ID
   title?: string
   metadata?: Record<string, unknown>
-  origin?: ModelCall.Origin
+  origin?: SessionOrigin.Origin
   permission?: Permission.Ruleset
   agent?: AgentV2.ID
   model?: ModelV2.Ref
@@ -115,7 +115,12 @@ export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictE
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
-export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
+export type Error =
+  | NotFoundError
+  | MessageDecodeError
+  | OperationUnavailableError
+  | PromptConflictError
+  | SessionInput.InboxFullError
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
@@ -161,15 +166,16 @@ export interface Interface {
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | SessionInput.InboxFullError>
   /** Trusted admission path for typed runtime inputs that are not accepted by the public prompt API. */
   readonly internal: (input: {
     id: SessionMessage.ID
     sessionID: SessionSchema.ID
     prompt: Prompt
     delivery?: SessionInput.Delivery
+    pendingLimit?: number
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | SessionInput.InboxFullError>
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -183,7 +189,7 @@ export interface Interface {
     resume?: boolean
   }) => Effect.Effect<void, OperationUnavailableError>
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
-  readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
+  readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
@@ -433,6 +439,7 @@ const layer = Layer.effect(
               sessionID: input.sessionID,
               prompt: input.prompt,
               delivery,
+              pendingLimit: input.pendingLimit,
             }).pipe(
               Effect.catchDefect((defect) =>
                 defect instanceof SessionInput.LifecycleConflict
@@ -455,7 +462,7 @@ const layer = Layer.effect(
       }),
       switchAgent: Effect.fn("V2Session.switchAgent")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        if (session.origin?.type === "model_call")
+        if (session.origin?.type === "model_call" || session.origin?.type === "team_member")
           return yield* new OperationUnavailableError({ operation: "switchAgent" })
         yield* events.publish(SessionEvent.AgentSwitched, {
           sessionID: input.sessionID,
@@ -466,7 +473,7 @@ const layer = Layer.effect(
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        if (session.origin?.type === "model_call")
+        if (session.origin?.type === "model_call" || session.origin?.type === "team_member")
           return yield* new OperationUnavailableError({ operation: "switchModel" })
         if (
           session.model?.providerID === input.model.providerID &&
@@ -487,7 +494,7 @@ const layer = Layer.effect(
       }),
       wait: Effect.fn("V2Session.wait")(function* (sessionID) {
         yield* result.get(sessionID)
-        return yield* new OperationUnavailableError({ operation: "wait" })
+        yield* execution.wait(sessionID)
       }),
       active: execution.active,
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {

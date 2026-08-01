@@ -44,7 +44,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { ModelCall } from "@opencode-ai/schema/model-call"
+import { SessionOrigin } from "@opencode-ai/schema/session-origin"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -111,7 +111,7 @@ export function fromRow(row: SessionRow): Info {
     },
     share,
     metadata: row.metadata ?? undefined,
-    ...(Schema.is(ModelCall.Origin)(row.origin) ? { origin: row.origin } : {}),
+    ...(Schema.is(SessionOrigin.Origin)(row.origin) ? { origin: row.origin } : {}),
     revert,
     permission: row.permission ? [...row.permission] : undefined,
     time: {
@@ -245,13 +245,13 @@ export const Info = Schema.Struct({
   model: optional(Model),
   version: Schema.String,
   metadata: optional(Metadata),
-  origin: optional(ModelCall.Origin),
+  origin: optional(SessionOrigin.Origin),
   time: Time,
   permission: optional(PermissionV1.Ruleset),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
 export type Info = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Info>>, "origin"> & {
-  origin?: ModelCall.Origin
+  origin?: SessionOrigin.Origin
 }
 
 export const ProjectInfo = Schema.Struct({
@@ -266,7 +266,7 @@ export const GlobalInfo = Schema.Struct({
   project: Schema.NullOr(ProjectInfo),
 }).annotate({ identifier: "GlobalSession" })
 export type GlobalInfo = Omit<Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>, "origin"> & {
-  origin?: ModelCall.Origin
+  origin?: SessionOrigin.Origin
 }
 
 export const CreateInput = Schema.optional(
@@ -445,7 +445,7 @@ export interface Interface {
     agent?: string
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
-    origin?: ModelCall.Origin
+    origin?: SessionOrigin.Origin
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
@@ -533,7 +533,7 @@ const layer: Layer.Layer<
       directory: string
       path?: string
       metadata?: typeof Metadata.Type
-      origin?: ModelCall.Origin
+      origin?: SessionOrigin.Origin
       permission?: PermissionV1.Ruleset
     }) {
       const ctx = yield* InstanceState.context
@@ -700,7 +700,7 @@ const layer: Layer.Layer<
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
-      origin?: ModelCall.Origin
+      origin?: SessionOrigin.Origin
       permission?: PermissionV1.Ruleset
       workspaceID?: WorkspaceV2.ID
     }) {
@@ -808,7 +808,7 @@ const layer: Layer.Layer<
         current.model.id === input.model.id &&
         normalizeModelVariant(current.model.variant) === normalizeModelVariant(input.model.variant)
       if (same) return
-      if (current.origin?.type === "model_call") {
+      if (current.origin?.type === "model_call" || current.origin?.type === "team_member") {
         return yield* Effect.die(new ModelCallChildImmutableError({ sessionID: input.sessionID }))
       }
       yield* patch(input.sessionID, {

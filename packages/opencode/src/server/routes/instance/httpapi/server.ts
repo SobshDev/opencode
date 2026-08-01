@@ -68,6 +68,9 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { ModelCallTool } from "@opencode-ai/core/tool/model-call"
 import { ModelCallV2 } from "@opencode-ai/core/model-call"
+import { TeamV2 } from "@opencode-ai/core/team"
+import { TeamWorkspace } from "@opencode-ai/core/team/workspace"
+import { TeamTool } from "@opencode-ai/core/tool/team"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@opencode-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
@@ -298,10 +301,21 @@ export function createRoutes(
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
     Layer.provide(
-      AppNodeBuilderV1.build(LayerNode.group([SessionV2.node, ModelCallV2.node, ModelCallTool.node]), [
-        [LocationServiceMap.node, locationServiceMapV2],
-        [SessionExecution.node, SessionExecutionLocal.node],
-      ]),
+      AppNodeBuilderV1.build(
+        LayerNode.group([
+          SessionV2.node,
+          SessionExecution.node,
+          ModelCallV2.node,
+          ModelCallTool.node,
+          TeamV2.node,
+          TeamWorkspace.node,
+          TeamTool.node,
+        ]),
+        [
+          [LocationServiceMap.node, locationServiceMapV2],
+          [SessionExecution.node, SessionExecutionLocal.node],
+        ],
+      ),
     ),
     Layer.provide(locationServiceMapV2),
 

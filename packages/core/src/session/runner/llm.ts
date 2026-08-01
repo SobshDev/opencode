@@ -216,12 +216,13 @@ const layer = Layer.effect(
         ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
-        responseFormat: session.origin?.outputSchema
-          ? {
-              type: "json",
-              schema: session.origin.outputSchema,
-            }
-          : undefined,
+        responseFormat:
+          session.origin?.type === "model_call" && session.origin.outputSchema
+            ? {
+                type: "json",
+                schema: session.origin.outputSchema,
+              }
+            : undefined,
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
