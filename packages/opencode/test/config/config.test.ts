@@ -371,6 +371,23 @@ it.instance("updates config and preserves empty shell sentinel", () =>
   }),
 )
 
+it.instance("replaces model_call when updating project config", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(
+      test.directory,
+      { model_call: { models: { "openrouter/old": { description: "Old model" } } } },
+      "config.json",
+    )
+
+    yield* Config.use.update({ model_call: { models: {} } })
+
+    expect(yield* FSUtil.use.readJson(path.join(test.directory, "config.json"))).toMatchObject({
+      model_call: { models: {} },
+    })
+  }),
+)
+
 it.effect("updates global config and omits empty shell key in json", () =>
   withGlobalConfig({ config: { shell: "bash" } }, ({ dir }) =>
     Effect.gen(function* () {
@@ -394,6 +411,27 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
       expect(parsed.shell).toBeUndefined()
       expect(parsed.model).toBe("test/model")
     }),
+  ),
+)
+
+it.effect("replaces model_call when updating global JSONC", () =>
+  withGlobalConfig(
+    {
+      config: { model_call: { models: { "openrouter/old": { description: "Old model" } } } },
+      name: "opencode.jsonc",
+    },
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.updateGlobal({ model_call: { models: {} } })
+
+        const file = path.join(dir, "opencode.jsonc")
+        const parsed = ConfigParse.schema(
+          ConfigV1.Info,
+          ConfigParse.jsonc(yield* FSUtil.use.readFileString(file), file),
+          file,
+        )
+        expect(parsed.model_call?.models).toEqual({})
+      }),
   ),
 )
 
@@ -1083,6 +1121,20 @@ it.effect("deduplicates duplicate instructions from global and local configs", (
     },
     Effect.gen(function* () {
       expect((yield* Config.use.get()).instructions).toEqual(["duplicate.md", "global-only.md", "local-only.md"])
+    }),
+  ),
+)
+
+it.effect("replaces global model_call configuration with the project configuration", () =>
+  withConfigTree(
+    {
+      global: { model_call: { models: { "openrouter/global": { description: "Global model" } } } },
+      project: { model_call: { models: { "openrouter/project": { description: "Project model" } } } },
+    },
+    Effect.gen(function* () {
+      expect((yield* Config.use.get()).model_call).toEqual({
+        models: { "openrouter/project": { description: "Project model" } },
+      })
     }),
   ),
 )

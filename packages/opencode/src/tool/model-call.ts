@@ -8,6 +8,7 @@ import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { isDeepStrictEqual } from "node:util"
 import { Cause, Effect, Exit, Option, Scope } from "effect"
 import { Provider } from "@/provider/provider"
+import { Config } from "@/config/config"
 import { Session } from "@/session/session"
 import { MessageID, PartID, type SessionID } from "@/session/schema"
 import type { SessionPrompt } from "@/session/prompt"
@@ -49,6 +50,7 @@ export const ModelCallTool = Tool.define(
     const provider = yield* Provider.Service
     const sessions = yield* Session.Service
     const calls = yield* ModelCallV2.Service
+    const config = yield* Config.Service
     const scope = yield* Scope.Scope
 
     const prepare = Effect.fn("ModelCallTool.prepare")(function* (input: ModelCall.CallInput, ctx: Tool.Context) {
@@ -56,17 +58,11 @@ export const ModelCallTool = Tool.define(
         return yield* Effect.fail(new Error("model_call requires a provider tool-call ID"))
       }
       const title = callTitle(input)
-      yield* ctx.ask({
-        permission: "model_call",
-        patterns: [`${input.model.providerID}/${input.model.id}`],
-        always: [`${input.model.providerID}/${input.model.id}`],
-        metadata: {
-          model: input.model,
-          background: input.background === true,
-          title,
-        },
-      })
       const model = yield* provider.getModel(input.model.providerID, input.model.id)
+      const policy = (yield* config.get()).model_call
+      if (policy !== undefined && policy.models[`${input.model.providerID}/${input.model.id}`] === undefined) {
+        return yield* Effect.fail(new Error(`Model unavailable: ${input.model.providerID}/${input.model.id}`))
+      }
       yield* provider.getLanguage(model)
       if (
         input.model.variant !== undefined &&
@@ -80,6 +76,16 @@ export const ModelCallTool = Tool.define(
       if (!model.capabilities.input.text || !model.capabilities.output.text) {
         return yield* Effect.fail(new Error(`Model is not text-callable: ${input.model.providerID}/${input.model.id}`))
       }
+      yield* ctx.ask({
+        permission: "model_call",
+        patterns: [`${input.model.providerID}/${input.model.id}`],
+        always: [`${input.model.providerID}/${input.model.id}`],
+        metadata: {
+          model: input.model,
+          background: input.background === true,
+          title,
+        },
+      })
       if (input.output_schema !== undefined) {
         const validation = ModelCallOrchestration.validateOutputSchema(input.output_schema)
         if (!validation.valid) return yield* Effect.fail(new Error(validation.error))

@@ -39,7 +39,9 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
 function mergeConfig(target: Info, source: Info): Info {
-  return mergeDeep(target, source) as Info
+  const merged = mergeDeep(target, source) as Info
+  if (source.model_call !== undefined) merged.model_call = source.model_call
+  return merged
 }
 
 function mergeConfigConcatArrays(target: Info, source: Info): Info {
@@ -147,7 +149,7 @@ function globalConfigFile() {
 }
 
 function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
-  if (!isRecord(patch)) {
+  if (!isRecord(patch) || (path.length === 1 && path[0] === "model_call")) {
     const edits = modify(input, path, patch, {
       formattingOptions: {
         insertSpaces: true,
@@ -626,7 +628,7 @@ const layer = Layer.effect(
       const file = path.join(dir, "config.json")
       const existing = yield* loadFile(file)
       yield* fs
-        .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
+        .writeFileString(file, JSON.stringify(writable(mergeConfig(existing, config)), null, 2))
         .pipe(Effect.orDie)
     })
 
@@ -643,7 +645,7 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), patch)
+        const merged = writable(mergeConfig(existing, patch as Info))
         const serialized = JSON.stringify(merged, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)

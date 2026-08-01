@@ -11,7 +11,7 @@ import { ID } from "@opencode-ai/schema/agent"
 import { Location } from "@opencode-ai/schema/location"
 import { ModelCall } from "@opencode-ai/schema/model-call"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { Deferred, Effect, Exit, Fiber, Option, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Schema } from "effect"
 import { Agent } from "@/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { Config } from "@/config/config"
@@ -31,7 +31,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { ProviderTest } from "../fake/provider"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 
@@ -531,11 +531,84 @@ describe("tool.models", () => {
       expect(output.items.map((item) => item.ref.id)).toEqual([model.id, textModel.id])
     }),
   )
+
+  it.instance("filters models using configured descriptions", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Bun.write(
+          `${test.directory}/opencode.json`,
+          JSON.stringify({
+            model_call: {
+              models: {
+                [`${model.providerID}/${model.id}`]: { description: "Use for repository-wide code review" },
+              },
+            },
+          }),
+        ),
+      )
+      const seeded = yield* seed()
+      const tool = yield* ModelsTool
+      const def = yield* tool.init()
+      const result = yield* def.execute(
+        { query: "repository-wide" },
+        context({ parentID: seeded.parent.id, messageID: seeded.messageID, ops: stubOps() }),
+      )
+      const output = Schema.decodeUnknownSync(ModelCall.ListResult)(JSON.parse(result.output))
+
+      expect(output.items).toHaveLength(1)
+      expect(output.items[0]).toMatchObject({
+        ref: { providerID: model.providerID, id: model.id },
+        description: "Use for repository-wide code review",
+      })
+    }),
+  )
 })
 
 describe("tool.model_call", () => {
+  it.instance("rejects models outside the allowlist before asking permission", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Bun.write(`${test.directory}/opencode.json`, JSON.stringify({ model_call: { models: {} } })),
+      )
+      const seeded = yield* seed()
+      const tool = yield* ModelCallTool
+      const def = yield* tool.init()
+      const asks: unknown[] = []
+
+      const exit = yield* def
+        .execute(
+          { model: { providerID: model.providerID, id: model.id }, prompt: "Do not run" },
+          context({
+            parentID: seeded.parent.id,
+            messageID: seeded.messageID,
+            ops: stubOps(),
+            ask: (input) => asks.push(input),
+          }),
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit))
+        expect(Cause.pretty(exit.cause)).toContain(`Model unavailable: ${model.providerID}/${model.id}`)
+      expect(asks).toEqual([])
+    }),
+  )
+
   it.instance("creates a fresh exact-model child and returns complete provenance", () =>
     Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Bun.write(
+          `${test.directory}/opencode.json`,
+          JSON.stringify({
+            model_call: {
+              models: { [`${model.providerID}/${model.id}`]: { description: "Use for code review" } },
+            },
+          }),
+        ),
+      )
       const calls = yield* ModelCallV2.Service
       const sessions = yield* Session.Service
       const seeded = yield* seed()

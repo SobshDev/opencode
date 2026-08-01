@@ -56,11 +56,13 @@ describe("CallableModels", () => {
         released: 5,
         tools: true,
       }),
+      "Best for difficult implementation work",
     )
 
     expect(model).toEqual({
       ref: { providerID: ProviderV2.ID.make("openai"), id: ModelV2.ID.make("gpt-5") },
       name: "GPT-5",
+      description: "Best for difficult implementation work",
       family: ModelV2.Family.make("gpt"),
       capabilities: { tools: true, input: ["text"], output: ["text"] },
       variants: [ModelV2.VariantID.make("fast")],
@@ -120,5 +122,10 @@ describe("CallableModels", () => {
         query: "anthropic/catalog/claude-sonnet",
       }).items[0]?.ref.id,
     ).toBe(ModelV2.ID.make("catalog/claude-sonnet"))
+    expect(
+      CallableModels.search([CallableModels.fromConfiguredModel(models[0], "Use for repository-wide migrations")], {
+        query: "repository-wide",
+      }).items[0]?.ref.id,
+    ).toBe(ModelV2.ID.make("gpt-4"))
   })
 })

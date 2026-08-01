@@ -51,6 +51,7 @@ describe("ModelCall", () => {
     expect(Object.keys(ModelCall.CallableModel.fields)).toEqual([
       "ref",
       "name",
+      "description",
       "family",
       "capabilities",
       "variants",

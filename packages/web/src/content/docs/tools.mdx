@@ -314,15 +314,17 @@ Each question includes a header, the question text, and a list of options. Users
 
 Search the models that the current session can call with [`model_call`](#model_call).
 
+When [`model_call.models`](/docs/config#model-call-allowlist) is configured, results are limited to that allowlist. Each result includes its configured usage description.
+
 All fields are optional:
 
-| Field        | Type      | Description                                                                                  |
-| ------------ | --------- | -------------------------------------------------------------------------------------------- |
-| `query`      | string    | Search provider IDs, model IDs, display names, families, and variant names.                  |
-| `providerID` | string    | Return only models from this exact provider.                                                 |
-| `tools`      | boolean   | Filter by whether the target model supports tool calls.                                      |
-| `limit`      | integer   | Number of results to return. Defaults to `20` and cannot exceed `50`.                         |
-| `cursor`     | string    | Continue a search using the exact `nextCursor` returned by the previous call.                 |
+| Field        | Type    | Description                                                                                |
+| ------------ | ------- | ------------------------------------------------------------------------------------------ |
+| `query`      | string  | Search provider IDs, model IDs, display names, families, variants, and usage descriptions. |
+| `providerID` | string  | Return only models from this exact provider.                                               |
+| `tools`      | boolean | Filter by whether the target model supports tool calls.                                    |
+| `limit`      | integer | Number of results to return. Defaults to `20` and cannot exceed `50`.                      |
+| `cursor`     | string  | Continue a search using the exact `nextCursor` returned by the previous call.              |
 
 For example:
 
@@ -360,6 +362,8 @@ This is a model-facing discovery tool. The terminal commands [`opencode models`]
 ### model_call
 
 Delegate a prompt to an exact model in a fresh child session.
+
+Targets must be permitted by the optional [`model_call.models`](/docs/config#model-call-allowlist) configuration. Direct references outside that allowlist are rejected even when the model remains available for normal sessions.
 
 ```json
 {

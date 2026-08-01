@@ -5,6 +5,8 @@ import { Cause, Effect, Layer, Scope } from "effect"
 import { isDeepStrictEqual } from "node:util"
 import { AgentV2 } from "../agent"
 import { Catalog } from "../catalog"
+import { CallableModels } from "../callable-model"
+import { Config } from "../config"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocationServiceMap } from "../location-service-map"
@@ -58,6 +60,7 @@ const layer = Layer.effectDiscard(
         const catalog = yield* Catalog.Service
         const resolver = yield* SessionRunnerModel.Service
         const agents = yield* AgentV2.Service
+        const config = yield* Config.Service
         const agent = yield* agents.select(context.agent)
         const selected = (yield* catalog.model.available()).find(
           (model) =>
@@ -67,6 +70,12 @@ const layer = Layer.effectDiscard(
             model.capabilities.output.includes("text"),
         )
         if (!selected)
+          return yield* new SessionRunnerModel.ModelUnavailableError({
+            providerID: requestedModel.providerID,
+            modelID: requestedModel.id,
+          })
+        const policy = Config.latest(yield* config.entries(), "model_call")
+        if (!CallableModels.allowed(policy, selected))
           return yield* new SessionRunnerModel.ModelUnavailableError({
             providerID: requestedModel.providerID,
             modelID: requestedModel.id,

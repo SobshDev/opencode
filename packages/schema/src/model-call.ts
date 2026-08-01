@@ -83,6 +83,7 @@ export interface CallableModel extends Schema.Schema.Type<typeof CallableModel> 
 export const CallableModel = Schema.Struct({
   ref: Model.Ref,
   name: Schema.String,
+  description: Schema.String.pipe(optional),
   family: Model.Family.pipe(optional),
   capabilities: Model.Capabilities,
   variants: Schema.Array(Model.VariantID),
